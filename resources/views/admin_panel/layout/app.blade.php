@@ -590,9 +590,8 @@
                             @endcanany
                         </li>
 
-
                         <!-- Vouchers Menu -->
-                        <li class="nav-item">
+                        <li class="nav-item d-none">
                             @canany(['chart.of.accounts.view', 'expense.voucher.view', 'receipts.voucher.view',
                                 'journal.voucher.view', 'payment.voucher.view', 'income.voucher.view'])
                                 <a href="#" class="nav-link">
@@ -630,7 +629,7 @@
                                 </div>
                             @endcanany
                         </li>
-                        <li class="nav-item">
+                        <li class="nav-item d-none">
                             @canany(['item.stock.report.view', 'purchase.report.view', 'sale.report.view',
                                 'customer.ledger.view', 'vendor.ledger.view', 'inventory.onhand.view', 'profit.loss.report.view',
                                 'recovery.report.view', 'payable.report.view', 'parties.balance.report.view', 'aging.report.view', 'balance.sheet.report.view', 'executive.report.view'])
@@ -707,7 +706,7 @@
                             @endcanany
                         </li>
                         <!-- HR Management Menu -->
-                        <li class="nav-item">
+                        <li class="nav-item d-none">
                             @canany(['hr.departments.view', 'hr.designations.view', 'hr.employees.view',
                                 'hr.attendance.view', 'hr.payroll.view', 'hr.leaves.view', 'hr.salary.structure.view',
                                 'hr.shifts.view', 'hr.holidays.view', 'hr.loans.view', 'hr.biometric.devices.view'])
@@ -767,7 +766,7 @@
                             @endcanany
                         </li>
                         <!-- User Management Menu -->
-                        <li class="nav-item">
+                        <li class="nav-item d-none" >
                             @canany(['users.view', 'roles.view', 'permissions.view', 'branches.view'])
                                 <a href="#" class="nav-link">
                                     <i class="menu_icon fas fa-clipboard-list"></i>
@@ -799,7 +798,7 @@
 
                         <!-- Settings -->
                         @if (auth()->check() && (auth()->user()->email === 'admin@admin.com' || auth()->user()->hasRole('Super Admin')))
-                            <li class="nav-item">
+                            <li class="nav-item d-none">
                                 <a href="{{ route('settings.index') }}" class="nav-link">
                                     <i class="menu_icon fas fa-cog"></i>
                                     <span class="menu-title">Settings</span>
