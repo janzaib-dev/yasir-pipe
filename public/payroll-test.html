@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payroll Enhancement Test</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --hr-text: #1e293b;
+            --hr-text-light: #64748b;
+            --hr-border: #e2e8f0;
+        }
+
+        body {
+            background: #f8fafc;
+            padding: 40px;
+        }
+
+        /* Expandable section styles */
+        .expandable-section {
+            border: 1px solid var(--hr-border);
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 16px;
+            transition: all 0.3s ease;
+            background: white;
+        }
+
+        .expandable-section:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        }
+
+        .expandable-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 18px;
+            background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.2s ease;
+        }
+
+        .expandable-header:hover {
+            background: linear-gradient(135deg, #f1f5f9, #e2e8f0);
+        }
+
+        .expandable-header.active {
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            color: white;
+        }
+
+        .expandable-header.active .expand-icon {
+            transform: rotate(180deg);
+            color: white;
+        }
+
+        .expandable-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+
+        .expandable-value {
+            font-weight: 700;
+            font-size: 1.05rem;
+        }
+
+        .expand-icon {
+            font-size: 0.9rem;
+            transition: transform 0.3s ease, color 0.2s ease;
+            color: var(--hr-text-light);
+        }
+
+        .expandable-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), 
+                        padding 0.3s ease;
+            background: white;
+            padding: 0 18px;
+        }
+
+        .expandable-content.active {
+            max-height: 1000px;
+            padding: 16px 18px;
+            border-top: 2px solid #e2e8f0;
+        }
+
+        .detail-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px dashed #e2e8f0;
+        }
+
+        .detail-item:last-child {
+            border-bottom: none;
+        }
+
+        .detail-item-label {
+            color: var(--hr-text-light);
+            font-size: 0.875rem;
+        }
+
+        .detail-item-value {
+            font-weight: 600;
+            color: var(--hr-text);
+            font-size: 0.875rem;
+        }
+
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .period-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            margin-bottom: 20px;
+        }
+
+        .attendance-stat {
+            background: #f8fafc;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            border-left: 3px solid #6366f1;
+        }
+
+        .attendance-stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+        }
+
+        .stat-highlight {
+            background: linear-gradient(135deg, #fef3c7, #fde68a);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 700;
+            color: #92400e;
+        }
+
+        .stat-highlight.danger {
+            background: linear-gradient(135deg, #fee2e2, #fecaca);
+            color: #991b1b;
+        }
+
+        .stat-highlight.success {
+            background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+            color: #065f46;
+        }
+
+        .test-title {
+            color: #6366f1;
+            margin-bottom: 30px;
+        }
+
+        .status-indicator {
+            padding: 8px 16px;
+            border-radius: 6px;
+            margin: 20px 0;
+            font-weight: 600;
+        }
+
+        .status-success {
+            background: #d1fae5;
+            color: #065f46;
+            border: 2px solid #10b981;
+        }
+
+        .status-info {
+            background: #dbeafe;
+            color: #1e40af;
+            border: 2px solid #3b82f6;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h2 class="test-title"><i class="fas fa-flask"></i> Payroll Enhancement Test Page</h2>
+        
+        <div class="status-indicator status-info">
+            <i class="fas fa-info-circle"></i> This is a standalone test to verify the expandable sections work correctly.
+        </div>
+
+        <!-- Payroll Period Badge -->
+        <div class="period-badge">
+            <i class="fa fa-calendar-alt"></i>
+            <span>Payroll Period: March 2026</span>
+        </div>
+
+        <h5 class="mt-4 mb-3">Earnings Section</h5>
+
+        <!-- Allowances Expandable Section -->
+        <div class="expandable-section allowances-section">
+            <div class="expandable-header" onclick="toggleExpandable(this)">
+                <div class="expandable-title">
+                    <i class="fa fa-plus-circle"></i>
+                    <span>Allowances</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span class="expandable-value">Rs. 12,000.00</span>
+                    <i class="fa fa-chevron-down expand-icon"></i>
+                </div>
+            </div>
+            <div class="expandable-content">
+                <div class="detail-item">
+                    <span class="detail-item-label">
+                        <i class="fa fa-check-circle text-success" style="font-size: 0.75rem;"></i>
+                        Housing Allowance
+                    </span>
+                    <span class="detail-item-value">Rs. 8,000.00</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-item-label">
+                        <i class="fa fa-check-circle text-success" style="font-size: 0.75rem;"></i>
+                        Transport Allowance
+                    </span>
+                    <span class="detail-item-value">Rs. 4,000.00</span>
+                </div>
+            </div>
+        </div>
+
+        <h5 class="mt-4 mb-3">Deductions Section</h5>
+
+        <!-- Attendance Deductions Expandable Section -->
+        <div class="expandable-section attendance-section">
+            <div class="expandable-header" onclick="toggleExpandable(this)">
+                <div class="expandable-title">
+                    <i class="fa fa-user-clock"></i>
+                    <span>Attendance Deductions</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span class="expandable-value">Rs. 3,500.00</span>
+                    <i class="fa fa-chevron-down expand-icon"></i>
+                </div>
+            </div>
+            <div class="expandable-content">
+                <div class="attendance-stat">
+                    <div class="attendance-stat-row">
+                        <span class="detail-item-label"><i class="fa fa-calendar"></i> Total Working Days:</span>
+                        <span class="stat-highlight">22</span>
+                    </div>
+                    <div class="attendance-stat-row">
+                        <span class="detail-item-label"><i class="fa fa-check text-success"></i> Days Present:</span>
+                        <span class="stat-highlight success">20</span>
+                    </div>
+                    <div class="attendance-stat-row">
+                        <span class="detail-item-label"><i class="fa fa-times text-danger"></i> Days Absent:</span>
+                        <span class="stat-highlight danger">2</span>
+                    </div>
+                    <div class="attendance-stat-row">
+                        <span class="detail-item-label"><i class="fa fa-clock"></i> Late Check-ins:</span>
+                        <span class="stat-highlight">3</span>
+                    </div>
+                    <div class="attendance-stat-row">
+                        <span class="detail-item-label"><i class="fa fa-running"></i> Early Check-outs:</span>
+                        <span class="stat-highlight">1</span>
+                    </div>
+                </div>
+                <div class="detail-item" style="margin-top: 12px; padding-top: 12px; border-top: 2px solid #6366f1;">
+                    <span class="detail-item-label" style="font-weight: 700;">Total Deduction Amount:</span>
+                    <span class="detail-item-value" style="color: #dc2626; font-size: 1rem;">Rs. 3,500.00</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="status-indicator status-success mt-4">
+            <i class="fas fa-check-circle"></i> If you can click the sections above and they expand/collapse smoothly with purple gradient, the CSS and JavaScript are working correctly!
+        </div>
+
+        <div class="mt-4">
+            <h6>Troubleshooting Steps:</h6>
+            <ol>
+                <li>Click on the "Allowances" section above - it should expand smoothly</li>
+                <li>Click again - it should collapse</li>
+                <li>Watch for the purple gradient background when expanded</li>
+                <li>Check browser console (F12) for any JavaScript errors</li>
+                <li>If this works but your main app doesn't, try hard refresh (Ctrl+Shift+R)</li>
+            </ol>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script>
+        // Toggle expandable sections
+        function toggleExpandable(header) {
+            const $header = $(header);
+            const $content = $header.next('.expandable-content');
+            const isActive = $header.hasClass('active');
+            
+            if (isActive) {
+                $header.removeClass('active');
+                $content.removeClass('active');
+            } else {
+                $header.addClass('active');
+                $content.addClass('active');
+            }
+
+            // Log to console for debugging
+            console.log('Toggle clicked:', { 
+                isActive: !isActive, 
+                headerClass: header.className,
+                contentHeight: $content[0].scrollHeight 
+            });
+        }
+
+        $(document).ready(function() {
+            console.log('✅ Payroll Enhancement Test Page Loaded');
+            console.log('✅ jQuery version:', $.fn.jquery);
+            console.log('✅ Expandable sections found:', $('.expandable-section').length);
+        });
+    </script>
+</body>
+</html>

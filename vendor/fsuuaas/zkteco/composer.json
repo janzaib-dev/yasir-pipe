@@ -1,0 +1,19 @@
+{
+    "name": "fsuuaas/zkteco",
+    "description": "Laravel library for ZKTeco Attendance Machine",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Sharif Uddin Ahamed",
+            "email": "fsuuaas@gmail.com"
+        }
+    ],
+    "autoload": {
+      "psr-4":{
+          "Fsuuaas\\Zkteco\\": "src"
+      }
+    },
+    "minimum-stability": "dev",
+    "require": {}
+}

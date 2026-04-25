@@ -1,0 +1,516 @@
+
+@extends('admin_panel.layout.app')
+
+@section('content')
+<div class="container-fluid py-4">
+
+
+
+
+    {{-- Voucher Table --}}
+    <div class="card shadow-sm">
+     <div class="card-header d-flex justify-content-between align-items-center text-white">
+    <h6 class="mb-0">Voucher List</h6>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#voucherModal">
+        <i class="bi bi-plus-circle"></i> Add Voucher
+    </button>
+</div>
+
+        <div class="card-body">
+            <table id="voucherTable" class="table table-bordered table-striped table-hover align-middle">
+                <thead class="table-dark">
+                    <tr>
+                        {{--  <th>Sales Officer</th>  --}}
+                    
+                        <th>id</th>
+                        <th>Customer</th>
+                        <th>party</th>
+                        {{--  <th>Sub-Head</th>  --}}
+                        <th>Narration</th>
+                        <th>Amount</th>
+                            <th>Date</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach($vouchers as $voucher)
+                    <tr>
+                        <td>{{ $voucher->id }}</td>
+                  
+                        <td>{{ ucfirst($voucher->type) }}</td>
+                        <td>{{ $voucher->person }}</td>
+                        {{--  <td>{{ $voucher->sub_head }}</td>  --}}
+                        <td>{{ $voucher->narration }}</td>
+                        <td>{{ number_format($voucher->amount, 2) }}</td>
+                              <td>{{ $voucher->date }}</td>
+                        <td>
+                            <button class="btn btn-warning btn-sm edit-btn"
+                                data-id="{{ $voucher->id }}"
+                                data-sales_officer="{{ $voucher->sales_officer }}"
+                                data-date="{{ $voucher->date }}"
+                                data-type="{{ $voucher->type }}"
+                                data-person="{{ $voucher->person }}"
+                                data-sub_head="{{ $voucher->sub_head }}"
+                                data-narration="{{ $voucher->narration }}"
+                                data-amount="{{ $voucher->amount }}"
+                                data-bs-toggle="modal"
+                                data-bs-target="#voucherModal">
+                                Edit
+                            </button>
+                        </td>
+                    </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{{-- Voucher Modal --}}
+<div class="modal fade" id="voucherModal" tabindex="-1" aria-labelledby="voucherModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form action="{{ route('vouchers.store') }}" method="POST">
+                @csrf
+                <input type="hidden" name="id" id="voucher_id">
+
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title" id="voucherModalLabel">Add Voucher</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+
+              <div class="modal-body">
+    <table class="table" id="voucherItemsTable">
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Customer Type</th>
+                <th>Customer</th>
+                <th>Narration</th>
+                <th>Amount</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr class="voucher-row">
+                <td><input type="date" name="date[]" class="form-control" required></td>
+                <td>
+                    <select name="type[]" class="form-select type-select" required>
+                        <option value="Main Customer">Main Customer</option>
+                        <option value="customer">Customer</option>
+                        <option value="Walking Customer">Walking Customer</option>
+                    </select>
+                </td>
+                <td>
+                    <select name="person[]" class="form-select person-select" required>
+                        <option value="">Select Customer</option>
+                        {{-- options will be loaded by ajax --}}
+                    </select>
+                </td>
+                <td>
+                    <input type="text" name="narration[]" class="form-control" required>
+                </td>
+                <td>
+                    <input type="number" name="amount[]" class="form-control" step="0.01" required>
+                </td>
+                <td>
+                    <button type="button" class="btn btn-danger btn-sm remove-row">Remove</button>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <button type="button" class="btn btn-primary" id="addRowBtn">Add Another Voucher</button>
+</div>
+
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-success">Save Voucher</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script>
+$(document).ready(function(){
+
+    // Function to load customers for a given type and a specific row
+    function loadCustomers(type, $personSelect) {
+        $.ajax({
+            url: '{{ url("get-customers-by-type") }}',
+            type: 'GET',
+            data: { type: type },
+            success: function(data) {
+                $personSelect.empty();
+                $personSelect.append('<option value="">Select Customer</option>');
+                $.each(data.customers, function(i, customer) {
+                    $personSelect.append('<option value="'+customer.id+'">'+customer.customer_name+'</option>');
+                });
+            },
+            error: function() {
+                alert('Error fetching customers.');
+            }
+        });
+    }
+
+    // On customer type change, load relevant customers for that row
+    $('#voucherItemsTable').on('change', '.type-select', function(){
+        var selectedType = $(this).val();
+        var $personSelect = $(this).closest('tr').find('.person-select');
+        if(selectedType){
+            loadCustomers(selectedType, $personSelect);
+        } else {
+            $personSelect.empty().append('<option value="">Select Customer</option>');
+        }
+    });
+
+    // Add new row on button click
+    $('#addRowBtn').click(function(){
+        var $lastRow = $('#voucherItemsTable tbody tr:last');
+        var $newRow = $lastRow.clone();
+
+        // Clear inputs/selects in new row
+        $newRow.find('input').val('');
+        $newRow.find('select.person-select').empty().append('<option value="">Select Customer</option>');
+        $newRow.find('select.type-select').val('Main Customer');
+
+        // Append new row
+        $('#voucherItemsTable tbody').append($newRow);
+    });
+
+    // Remove row on remove button click
+    $('#voucherItemsTable').on('click', '.remove-row', function(){
+        var rowCount = $('#voucherItemsTable tbody tr').length;
+        if(rowCount > 1){
+            $(this).closest('tr').remove();
+        } else {
+            alert('At least one voucher row is required.');
+        }
+    });
+
+    // Trigger initial load of customers for first row based on default type
+    $('#voucherItemsTable tbody tr').each(function(){
+        var typeVal = $(this).find('.type-select').val();
+        var $personSelect = $(this).find('.person-select');
+        if(typeVal){
+            loadCustomers(typeVal, $personSelect);
+        }
+    });
+});
+</script>
+
+{{-- DataTables CSS/JS --}}
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css">
+<script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
+
+<script>
+$(document).ready(function () {
+    $('#voucherTable').DataTable();
+
+    // Edit Button Click
+    $('.edit-btn').on('click', function () {
+        $('#voucherModalLabel').text('Edit Voucher');
+        $('#voucher_id').val($(this).data('id'));
+        $('[name="sales_officer"]').val($(this).data('sales_officer'));
+        $('[name="date"]').val($(this).data('date'));
+        $('[name="type"]').val($(this).data('type'));
+        $('[name="person"]').val($(this).data('person'));
+        $('[name="sub_head"]').val($(this).data('sub_head'));
+        $('[name="narration"]').val($(this).data('narration'));
+        $('[name="amount"]').val($(this).data('amount'));
+    });
+
+    // Reset Form on Add New Click
+    $('[data-bs-target="#voucherModal"]').on('click', function () {
+        $('#voucherModalLabel').text('Add Voucher');
+        $('#voucher_id').val('');
+        $('#voucherModal form')[0].reset();
+    });
+});
+</script>
+@endsection
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+------------------------------------------------------------------------------
+
+
+
+@extends('admin_panel.layout.app')
+
+@section('content')
+<div class="container-fluid py-4">
+
+
+
+
+    {{-- Voucher Table --}}
+    <div class="card shadow-sm">
+     <div class="card-header d-flex justify-content-between align-items-center text-white">
+    <h6 class="mb-0">Voucher List</h6>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#voucherModal">
+        <i class="bi bi-plus-circle"></i> Add Voucher
+    </button>
+</div>
+
+        <div class="card-body">
+            <table id="voucherTable" class="table table-bordered table-striped table-hover align-middle">
+                <thead class="table-dark">
+                    <tr>
+                        {{--  <th>Sales Officer</th>  --}}
+                    
+                        <th>id</th>
+                        <th>Customer</th>
+                        <th>party</th>
+                        {{--  <th>Sub-Head</th>  --}}
+                        <th>Narration</th>
+                        <th>Amount</th>
+                            <th>Date</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach($vouchers as $voucher)
+                    <tr>
+                        <td>{{ $voucher->id }}</td>
+                  
+                        <td>{{ ucfirst($voucher->type) }}</td>
+                        <td>{{ $voucher->person }}</td>
+                        {{--  <td>{{ $voucher->sub_head }}</td>  --}}
+                        <td>{{ $voucher->narration }}</td>
+                        <td>{{ number_format($voucher->amount, 2) }}</td>
+                              <td>{{ $voucher->date }}</td>
+                        <td>
+                            <button class="btn btn-warning btn-sm edit-btn"
+                                data-id="{{ $voucher->id }}"
+                                data-sales_officer="{{ $voucher->sales_officer }}"
+                                data-date="{{ $voucher->date }}"
+                                data-type="{{ $voucher->type }}"
+                                data-person="{{ $voucher->person }}"
+                                data-sub_head="{{ $voucher->sub_head }}"
+                                data-narration="{{ $voucher->narration }}"
+                                data-amount="{{ $voucher->amount }}"
+                                data-bs-toggle="modal"
+                                data-bs-target="#voucherModal">
+                                Edit
+                            </button>
+                        </td>
+                    </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{{-- Voucher Modal --}}
+<div class="modal fade" id="voucherModal" tabindex="-1" aria-labelledby="voucherModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form action="{{ route('vouchers.store') }}" method="POST">
+                @csrf
+                <input type="hidden" name="id" id="voucher_id">
+
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title" id="voucherModalLabel">Add Voucher</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+
+                <div class="modal-body">
+                    <div class="row g-3">
+                       
+                        <div class="col-md-4">
+                            <label class="form-label">Date</label>
+                            <input type="date" name="date" class="form-control">
+                        </div>
+                       <div class="col-md-4">
+    <label class="form-label">Customer Type</label>
+    <select id="customerType" name="type" class="form-select form-control">
+        {{--  <option value="">Select Type</option>  --}}
+    
+        <option value="customer">Customer</option>
+ 
+        <option value="Walking Customer">Walking Customer</option>
+    </select>
+</div>
+
+<div class="col-md-4">
+    <label class="form-label">Customers</label>
+    <select id="customerList" name="person" class="form-select form-control">
+        <option value="">Select Customer</option>
+    </select>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<meta name="csrf-token" content="{{ csrf_token() }}">
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+    $.ajaxSetup({
+        headers: {
+            'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+        }
+    });
+
+    function loadCustomers(type) {
+        $.ajax({
+            url: '{{ url("get-customers-by-type") }}',
+            type: 'GET',
+            data: { type: type },
+            success: function(data) {
+                $('#customerList').empty();
+                $('#customerList').append('<option value="">Select Customer</option>');
+                $.each(data.customers, function(i, customer) {
+                    $('#customerList').append('<option value="'+customer.id+'">'+customer.customer_name+'</option>');
+                });
+            },
+            error: function() {
+                alert('Error fetching customers.');
+            }
+        });
+    }
+
+    // Page load pe Main Customer load karo
+    $(document).ready(function() {
+        loadCustomers('Main Customer');
+    });
+
+    // Jab dropdown se select ho to customer load karo
+    $('#customerType').on('change', function() {
+        var type = $(this).val();
+        if(type) {
+            loadCustomers(type);
+        } else {
+            // Agar koi select nahi, to dropdown clear karo
+            $('#customerList').empty();
+            $('#customerList').append('<option value="">Select Customer</option>');
+        }
+    });
+</script>
+
+
+
+<div class="col-md-4 d-none">
+    <label class="form-label">Sub-Head</label>
+    <select name="sub_head" class="form-select">
+        @foreach ($narration as $item)
+            <option value="{{ $item->expense_head }}">{{ $item->expense_head }}</option>
+        @endforeach
+    </select>
+</div>
+
+             <div class="col-md-6">
+    <label class="form-label">Narration</label>
+    <select id="narrationSelect" class="form-control">
+        @foreach ($narration as $item)
+            <option value="{{ $item->narration }}">{{ $item->narration }}</option>
+        @endforeach
+        <option value="custom">-- Custom Narration --</option>
+    </select>
+
+    <input type="text" id="customNarrationInput" placeholder="Write custom narration" class="form-control mt-2" style="display:none;">
+    <input type="hidden" name="narration" id="finalNarrationInput" />
+</div>
+
+<script>
+    const select = document.getElementById('narrationSelect');
+    const customInput = document.getElementById('customNarrationInput');
+    const finalInput = document.getElementById('finalNarrationInput');
+
+    select.addEventListener('change', function () {
+        if (this.value === 'custom') {
+            customInput.style.display = 'block';
+            customInput.focus();
+            finalInput.value = '';
+        } else {
+            customInput.style.display = 'none';
+            customInput.value = '';
+            finalInput.value = this.value;
+        }
+    });
+
+    customInput.addEventListener('input', function () {
+        finalInput.value = this.value;
+    });
+
+    // Initialize finalInput value with first select option on page load
+    window.addEventListener('DOMContentLoaded', () => {
+        if(select.value !== 'custom'){
+            finalInput.value = select.value;
+        }
+    });
+</script>
+
+                        <div class="col-md-6">
+                            <label class="form-label">Amount</label> 
+                            <input type="number" name="amount" class="form-control" placeholder="Amount">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-success">Save Voucher</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{{-- DataTables CSS/JS --}}
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css">
+<script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
+
+<script>
+$(document).ready(function () {
+    $('#voucherTable').DataTable();
+
+    // Edit Button Click
+    $('.edit-btn').on('click', function () {
+        $('#voucherModalLabel').text('Edit Voucher');
+        $('#voucher_id').val($(this).data('id'));
+        $('[name="sales_officer"]').val($(this).data('sales_officer'));
+        $('[name="date"]').val($(this).data('date'));
+        $('[name="type"]').val($(this).data('type'));
+        $('[name="person"]').val($(this).data('person'));
+        $('[name="sub_head"]').val($(this).data('sub_head'));
+        $('[name="narration"]').val($(this).data('narration'));
+        $('[name="amount"]').val($(this).data('amount'));
+    });
+
+    // Reset Form on Add New Click
+    $('[data-bs-target="#voucherModal"]').on('click', function () {
+        $('#voucherModalLabel').text('Add Voucher');
+        $('#voucher_id').val('');
+        $('#voucherModal form')[0].reset();
+    });
+});
+</script>
+@endsection

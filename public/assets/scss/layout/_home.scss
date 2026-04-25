@@ -1,0 +1,48 @@
+/* ============================ */
+/*            Home
+/* ============================ */
+
+.recent_activity {
+  small {
+    font-size: 11px;
+  }
+}
+
+.stat-icon i {
+  font-size: 36px;
+}
+
+.rt_icon_card {
+  padding: 10px;
+  span {
+    font-weight: 600;
+  }
+  p {
+    font-size: 16px;
+    font-weight: 500;
+  }
+  .icon_rt {
+    float: left;
+    width: 60px;
+    position: relative;
+    z-index: 1;
+    height: 60px;
+    background: #3644FF;
+    border-radius: 10px;
+    i {
+      line-height: 60px;
+      margin-bottom: 0;
+      font-size: 38px;
+      color: #fff;
+    }
+  }
+}
+
+.traffic-sales-amount {
+  float: right;
+  color: #3d405c;
+}
+
+/* ============================ */
+/*            End Home
+/* ============================ */
