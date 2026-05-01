@@ -20,7 +20,7 @@ class SaleController extends Controller
 {
     public function index()
     {
-        $sales = Sale::with(['customer_relation', 'items.product', 'returns'])
+        $sales = Sale::with(['customer_relation', 'items.product', 'items.package', 'returns'])
             ->whereIn('sale_status', ['draft', 'booked', 'posted', 'returned'])
             ->latest()
             ->get();
@@ -1029,7 +1029,7 @@ class SaleController extends Controller
                 $totalPieces += $loose;
 
                 // Calculate boxes for storage (reverse calculation)
-                $storedQtyBox = $ppb > 0 ? ($totalPieces / $ppb) : 0;
+                $storedQtyBox = $cf > 0 ? ($totalPieces / $cf) : 0;
 
                 $discount = (float) ($discounts[$index] ?? 0);
                 // 'pkr' means fixed PKR amount;  anything else ('percent' or missing) = percentage

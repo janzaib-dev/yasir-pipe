@@ -64,7 +64,7 @@
         }
 
         .col-stock {
-            width: 90px;
+            width: 130px;
         }
 
         .col-qty {
@@ -835,7 +835,12 @@
                             <span class="input-group-text qty-unit-label">...</span>
                         </div>
                     </td>
-                    <td><input type="number" class="form-control input-readonly pack-size" name="pieces_per_box_display[]" value="1" readonly></td>
+                    <td>
+                        <div class="input-group input-group-sm">
+                            <input type="text" class="form-control input-readonly pack-size text-end" name="pieces_per_box_display[]" value="1" readonly tabindex="-1">
+                            <span class="input-group-text base-unit-label">...</span>
+                        </div>
+                    </td>
                     <!-- Loose Column Removed -->
                     <td><input type="number" name="qty[]" class="form-control input-readonly qty-pcs" value="0" readonly></td>
                     <td><input type="number" name="price[]" class="form-control price" value="0"></td>
@@ -902,7 +907,9 @@
                     $row.find('.hidden-width').val(data.width || '');
 
                     // Also set visible pack size
-                    $row.find('.pack-size').val(data.pieces_per_box || 1);
+                    const cf = parseFloat(data.pieces_per_box || 1);
+                    $row.find('.pack-size').val(cf.toString());
+                    $row.find('.base-unit-label').text(data.base_unit || 'pc');
                     $row.find('.qty-unit-label').text(data.symbol || 'pc');
 
                     // Attach data to row for dynamic calc

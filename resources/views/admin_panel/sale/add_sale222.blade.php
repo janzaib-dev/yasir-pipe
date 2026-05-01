@@ -264,11 +264,11 @@
         }
 
         .col-stock {
-            width: 90px;
+            width: 130px;
         }
 
         .col-qty {
-            width: 90px;
+            width: 120px;
         }
 
 
@@ -481,10 +481,10 @@
                                 <thead>
                                     <tr>
                                         <th class="col-product">Product</th>
-                                        <th class="col-stock">Conv Factor</th>
-                                        <th class="col-qty qty-header">Total Qty</th>
-                                        <th class="col-qty pack-size-col">Pices Box</th>
-                                        <th class="col-pieces boxes-col">total pieces</th>
+                                        <th class="col-stock">Qty In Hand</th>
+                                        <th class="col-qty qty-header">Qty (Box.Loose)</th>
+                                        <th class="col-qty pack-size-col">Conv Factor</th>
+                                        <th class="col-pieces boxes-col d-none">Total Pieces</th>
                                         <th class="col-price-p price-pc-header">Retail Price</th>
                                         <th class="col-disc">Disc %</th>
                                         <th class="col-disc-amt">Disc Amt</th>
@@ -497,7 +497,7 @@
                                 </tbody>
                                 <tfoot>
                                     <tr>
-                                        <td colspan="8" class="text-end fw-bold">Total:</td>
+                                        <td colspan="7" class="text-end fw-bold">Total:</td>
                                         <td class="text-end fw-bold"><span id="totalAmount">0.00</span></td>
                                         <td></td>
                                     </tr>

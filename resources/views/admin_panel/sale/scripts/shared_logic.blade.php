@@ -185,11 +185,14 @@
 
     <!-- Conv Factor (Readonly) -->
     <td class="col-qty">
-       <input type="text" class="form-control pack-qty text-end input-readonly" name="pack_qty[]" readonly placeholder="CF" tabindex="-1">
+       <div class="input-group input-group-sm">
+         <input type="text" class="form-control pack-qty text-end input-readonly" name="pack_qty[]" readonly placeholder="CF" tabindex="-1">
+         <span class="input-group-text base-unit-label">...</span>
+       </div>
     </td>
 
-    <!-- Packet/Box (Calculated) -->
-    <td class="col-pieces">
+    <!-- Packet/Box (Calculated) - HIDDEN -->
+    <td class="col-pieces d-none">
       <input type="text" class="form-control total-pieces text-end input-readonly" name="total_pieces[]" readonly placeholder="Box" tabindex="-1">
     </td>
  
@@ -269,7 +272,9 @@
                 $row.find('.visible-price').val(pRes.price_per_m2 || pRes.retail_price || 0);
             }
 
-            $row.find('.pack-qty').val(pRes.pieces_per_box || 1);
+            const cf = parseFloat(pRes.pieces_per_box || 1);
+            $row.find('.pack-qty').val(cf.toString());
+            $row.find('.base-unit-label').text(pRes.base_unit || 'pc');
             $row.find('.price-per-piece').val(pRes.sale_price_per_piece || pRes.price_per_m2 || 0);
 
             $row.find('.size-h').val(pRes.height || '-');
@@ -289,6 +294,7 @@
             $row.data('pieces_per_box', pRes.pieces_per_box || 1);
             $row.data('price_per_m2', pRes.price_per_m2 || 0);
 
+            updateRowStockDisplay($row);
             computeRow($row);
         }).fail(function(err) {
             console.error('Price fetch failed', err);
@@ -312,44 +318,55 @@
                     var options = '<option value="">Select Warehouse</option>';
                     validWarehouses.forEach(function(w) {
                         const isSel = (preSelectId && preSelectId == w.warehouse_id) ? 'selected' : '';
-
-                        // Display Stock Logic
-                        let disp;
-                        const ppb = parseFloat(w.ppb) || 1;
-
-                        if ((w.size_mode === 'by_cartons' || w.size_mode === 'by_size') && ppb > 1) {
-                            const boxes = Math.floor(w.boxes || 0);
-                            const loose = w.stock % ppb;
-                            disp = loose > 0 ? `${boxes}.${loose}` : boxes;
-                        } else {
-                            disp = w.stock;
-                        }
-
                         options +=
-                            `<option value="${w.warehouse_id}" data-stock="${w.stock}" data-ppb="${disp}" data-size-mode="${w.size_mode}" ${isSel}>${w.warehouse_name} (Stock: ${disp})</option>`;
+                            `<option value="${w.warehouse_id}" data-stock="${w.stock}" data-size-mode="${w.size_mode}" ${isSel}>${w.warehouse_name} (Total Pieces: ${w.stock})</option>`;
                     });
                     $whSelect.html(options);
 
-                    // Auto-select first warehouse and display stock
                     if (preSelectId) {
-                        $whSelect.trigger('change');
+                        $whSelect.val(preSelectId).trigger('change');
                     } else if (validWarehouses.length >= 1) {
                         $whSelect.val(validWarehouses[0].warehouse_id).trigger('change');
                     }
-
-                    // Show stock in the visible stock field
-                    const selectedOpt = $whSelect.find(':selected');
-                    const stockDisp = selectedOpt.data('ppb') || 0;
-                    $row.find('.stock').val(stockDisp);
                 } else {
                     $whSelect.html('<option value="">Out of Stock</option>');
                     $row.find('.stock').val('0');
+                    $row.data('stock_display', '0');
                 }
             })
             .fail(function(xhr) {
                 console.error('Warehouse fetch error:', xhr);
                 $whSelect.html('<option value="">Error</option>');
             });
+    }
+
+    function updateRowStockDisplay($row) {
+        const $whSelect = $row.find('.warehouse');
+        const selectedOpt = $whSelect.find(':selected');
+        if (!selectedOpt.val()) return;
+
+        const stockPieces = parseFloat(selectedOpt.data('stock')) || 0;
+        const ppb = parseFloat($row.find('.pack-qty').val()) || 1;
+        const symbol = $row.find('.qty-unit-label').text() || 'pc';
+
+        let disp;
+        if (ppb > 1) {
+            const boxes = Math.floor(stockPieces / ppb);
+            const loose = Math.round(stockPieces % ppb);
+            disp = boxes.toString();
+            if (loose > 0) {
+                disp += "." + loose;
+            }
+        } else if (ppb > 0) {
+            // For fractional units (ppb < 1), always divide
+            const calc = stockPieces / ppb;
+            disp = Number.isInteger(calc) ? calc.toString() : calc.toFixed(2);
+        } else {
+            disp = stockPieces.toString();
+        }
+        
+        $row.find('.stock').val(disp);
+        $row.data('stock_display', disp + " " + symbol + " (Total: " + stockPieces + " base)");
     }
 
 
@@ -377,11 +394,9 @@
             totalPieces = (boxes * packQty) + loose;
             displayCalc = totalPieces;
         } else {
-            // Pieces
-            totalPieces = toNum(qtyInput);
-            if (packQty > 0) {
-                displayCalc = totalPieces / packQty;
-            }
+            // Multi-Unit Piece Mode
+            totalPieces = toNum(qtyInput) * packQty;
+            displayCalc = totalPieces;
         }
 
         const discValue = toNum($row.find('.discount-value').val());
@@ -391,44 +406,27 @@
         $row.find('.total-pieces').val(Number.isInteger(displayCalc) ? displayCalc : displayCalc.toFixed(2));
 
         // Gross Calc
-        // Logic: if mode=by_carton, use box price?
-        // Prioritize `price-per-piece` (hidden) if available, or fall back.
-        let unitPrice = toNum($row.find('.price-per-piece').val());
-        if (unitPrice <= 0) unitPrice = visiblePrice; // fallback
-
+        let unitPrice = 0;
         let gross = 0;
 
         if (sizeMode === 'by_size') {
-            gross = m2_per_piece * totalPieces * unitPrice;
-            if (!m2_per_piece) gross = 0;
-        } else if (sizeMode === 'by_cartons') {
-            // Check if we use m2 or box price
-            if (m2_per_piece > 0) {
-                gross = m2_per_piece * totalPieces * unitPrice;
-            } else {
-                // By Cartons (without size)
-                // If unitPrice is "Price per piece", gross = totalPieces * unitPrice
-                // If unitPrice is "Price per box", we need to adjust.
-                // Usually `price-per-piece` is strictly price per single unit.
-                gross = totalPieces * unitPrice;
-
-                // Note: In edit_sale logic:
-                // if (packQty > 0) gross = (totalPieces / packQty) * unitPrice;
-                // This implies unitPrice was Box Price in that specific context.
-                // Let's check `fetchProductPrice`. 
-                // .price-per-piece -> pRes.sale_price_per_piece.
-                // So it IS per piece. So gross = pieces * price_per_piece is correct.
-            }
+            // visiblePrice is Price per m²
+            unitPrice = visiblePrice * m2_per_piece; 
+            gross = totalPieces * unitPrice;
         } else {
-            gross = unitPrice * totalPieces;
+            // visiblePrice is Price per Package (Box/Piece)
+            // unitPrice must be price per base unit (piece/kg/etc)
+            unitPrice = visiblePrice / packQty;
+            gross = totalPieces * unitPrice;
         }
 
-        // Discount Calculation — alwys derived from discValue + discType
-        // Never rely on manually entered discount-amount (that field is now readonly/calculated)
+        // Sync for backend
+        $row.find('.price-per-piece').val(unitPrice.toFixed(4));
+
+        // Discount Calculation
         if (discType === 'percent') {
             dam = discValue > 0 ? (gross * discValue) / 100 : 0;
         } else {
-            // PKR / fixed mode: discValue IS the rupee amount
             dam = discValue > 0 ? discValue : 0;
         }
         $row.find('.discount-amount').val(dam.toFixed(2));
@@ -436,6 +434,7 @@
         const netRow = Math.max(0, gross - dam);
         $row.find('.gross-amount').val(gross.toFixed(2));
         $row.find('.sales-amount').val(netRow.toFixed(2));
+        $row.find('.amount').val(netRow.toFixed(2));
     }
 
     function updateGrandTotals() {
@@ -459,23 +458,7 @@
             if (gross <= 0 && net > 0) gross = net + dam;
 
             // Piece calc for total
-            const mode = $r.data('size_mode');
-            const qtyStr = $r.find('.sales-qty').val().toString();
-            const pq = parseFloat($r.find('.pack-qty').val()) || 1;
-
-            let pieces = 0;
-            if (mode === 'by_cartons' || mode === 'by_size') {
-                const parts = qtyStr.split('.');
-                const b = parseInt(parts[0]) || 0;
-                const l = parts[1] ? parseInt(parts[1]) : 0;
-                pieces = (b * pq) + l;
-            } else {
-                pieces = toNum(qtyStr);
-                // Plus loose pieces?? In 'std' mode, loose-pieces input might be used? 
-                // In edit_sale logic: `totalPieces = qtyPcs + loose`.
-                const loose = toNum($r.find('.loose-pieces').val());
-                pieces += loose;
-            }
+            const pieces = toNum($r.find('.total-pieces').val());
 
             tQty += pieces;
             tGross += gross;
@@ -804,9 +787,7 @@
         // Warehouse change -> stock
         $('#salesTableBody').on('change', '.warehouse', function() {
             const $row = $(this).closest('tr');
-            const stockPieces = $(this).find(':selected').data('ppb') || 0;
-
-            $row.find('.stock').val(stockPieces);
+            updateRowStockDisplay($row);
         });
 
         // Inputs -> Calc
@@ -847,14 +828,6 @@
             function() {
                 if ($(this).hasClass('sales-qty')) {
                     normalizeQtyInput($(this), $(this).closest('tr'));
-                }
-
-                // If user manually changes the visible price, also update the hidden price-per-piece
-                if ($(this).hasClass('visible-price')) {
-                    const $row = $(this).closest('tr');
-                    const newPrice = toNum($(this).val());
-                    $row.find('.price-per-piece').val(newPrice);
-                    $row.find('.retail-price').val(newPrice);
                 }
 
                 computeRow($(this).closest('tr'));

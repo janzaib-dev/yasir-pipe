@@ -55,7 +55,7 @@ class PurchaseController extends Controller
 
     public function index(Request $request)
     {
-        $query = Purchase::with(['branch', 'warehouse', 'vendor', 'items', 'returns']);
+        $query = Purchase::with(['branch', 'warehouse', 'vendor', 'items.product.unit', 'items.package', 'returns']);
 
         if ($request->has('status') && $request->status != 'all') {
             $query->where('status_purchase', $request->status);

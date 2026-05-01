@@ -31,9 +31,26 @@ class ProductController extends Controller
             return response()->json(['retail_price' => 0]);
         }
 
+        // Total stock in pieces
+        $stockPieces = \App\Models\WarehouseStock::where('product_id', $productId)->sum('total_pieces');
+        $cf = $package->conversion_factor > 0 ? $package->conversion_factor : 1;
+        $symbol = $package->symbol ?? '';
+
+        if ($package->is_fraction) {
+            $stockDisplayCount = $stockPieces / $cf;
+            $stockDisplay = number_format($stockDisplayCount, 2) . " " . $symbol;
+        } else {
+            $stockDisplayCount = floor($stockPieces / $cf); 
+            $loose = $stockPieces - ($stockDisplayCount * $cf);
+            $stockDisplay = $stockDisplayCount . " " . $symbol;
+            if ($loose > 0 && $cf > 1) {
+                $stockDisplay .= " (rem: {$loose} base)";
+            }
+        }
+
         return response()->json([
             'retail_price'          => $package->sale_price,
-            'size_mode'             => 'by_pieces',
+            'size_mode'             => $product->size_mode,
             'pieces_per_box'        => $package->conversion_factor,
             'price_per_m2'          => 0,
             'sale_price_per_box'    => $package->sale_price,
@@ -43,6 +60,10 @@ class ProductController extends Controller
             'item_code'             => $package->code ?? $product->item_code,
             'purchase_discount_percent' => $product->purchase_discount_percent ?? 0,
             'sale_discount_percent'     => $product->sale_discount_percent ?? 0,
+            'stock'                 => $stockDisplay,
+            'base_stock'            => $stockPieces,
+            'symbol'                => $symbol,
+            'base_unit'             => $product->unit->name ?? 'pc',
         ]);
     }
 
@@ -126,7 +147,8 @@ class ProductController extends Controller
                 'stock_pieces' => $stockPieces, 
                 'name' => $p->item_name . " - " . ($pkg->name ?? $pkg->code),
                 'symbol' => $symbol,
-                'size_mode' => 'by_pieces',
+                'base_unit' => $p->unit->name ?? 'pc',
+                'size_mode' => $p->size_mode,
                 'pieces_per_box' => $cf,
                 'ppb' => $cf,
                 'trade_price' => $pkg->purchase_price ?? 0,
