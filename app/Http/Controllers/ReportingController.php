@@ -362,142 +362,174 @@ class ReportingController extends Controller
 
     public function fetchPurchaseReport(Request $request)
     {
-        $startDate = $request->start_date;
-        $endDate = $request->end_date;
-        $productId = $request->product_id;
-        $vendorId = $request->vendor_id;
+        try {
+            $startDate = $request->start_date;
+            $endDate   = $request->end_date;
+            $productId = $request->product_id;
+            $vendorId  = $request->vendor_id;
 
-        $query = DB::table('purchases')
-            ->join('purchase_items', 'purchases.id', '=', 'purchase_items.purchase_id')
-            ->join('products', 'purchase_items.product_id', '=', 'products.id')
-            ->join('vendors', 'purchases.vendor_id', '=', 'vendors.id') // join vendor table
-            ->leftJoin('units', 'products.unit_id', '=', 'units.id')
-            ->select(
-                'purchases.purchase_date',
-                'purchases.invoice_no',
-                'vendors.name as vendor_name', // vendor name
-                'products.item_code',
-                'products.item_name',
-                'purchase_items.qty',
-                DB::raw('COALESCE(units.name, purchase_items.unit, "-") as unit'), // Fix null unit
-                'purchase_items.price',
-                'purchase_items.item_discount',
-                'purchase_items.line_total',
-                'purchases.subtotal',
-                'purchases.discount',
-                'purchases.extra_cost',
-                'purchases.net_amount',
-                'purchases.paid_amount',
-                'purchases.due_amount'
-            );
+            $query = DB::table('purchases')
+                ->join('purchase_items', 'purchases.id', '=', 'purchase_items.purchase_id')
+                ->join('products', 'purchase_items.product_id', '=', 'products.id')
+                ->join('vendors', 'purchases.vendor_id', '=', 'vendors.id')
+                ->leftJoin('units', 'products.unit_id', '=', 'units.id')
+                ->leftJoin('warehouses', 'purchases.warehouse_id', '=', 'warehouses.id')
+                ->leftJoin('product_packages', 'purchase_items.product_package_id', '=', 'product_packages.id')
+                ->select(
+                    'purchases.id as purchase_id',
+                    'purchases.purchase_date',
+                    'purchases.invoice_no',
+                    'vendors.name as vendor_name',
+                    'products.item_code',
+                    'products.item_name',
+                    'product_packages.name as package_name',
+                    'product_packages.symbol as package_symbol',
+                    'purchase_items.product_id',
+                    'purchase_items.qty',
+                    DB::raw('COALESCE(product_packages.symbol, units.name, purchase_items.unit, "-") as unit'),
+                    'purchase_items.price',
+                    'purchase_items.item_discount',
+                    'purchase_items.line_total',
+                    'purchases.subtotal as purchase_subtotal',
+                    'purchases.discount as purchase_discount',
+                    'purchases.extra_cost as purchase_extra_cost',
+                    'purchases.net_amount as purchase_net_amount',
+                    'purchases.paid_amount as purchase_paid_amount',
+                    'purchases.due_amount as purchase_due_amount',
+                    'purchases.status_purchase',
+                    'warehouses.warehouse_name'
+                );
 
-        if ($startDate && $endDate) {
-            $query->whereBetween('purchases.purchase_date', [$startDate, $endDate]);
+            if ($startDate && $endDate) {
+                $query->whereBetween('purchases.purchase_date', [$startDate, $endDate]);
+            }
+            if ($productId && $productId !== 'all') {
+                $query->where('purchase_items.product_id', $productId);
+            }
+            if ($vendorId && $vendorId !== 'all') {
+                $query->where('purchases.vendor_id', $vendorId);
+            }
+
+            $results = $query->orderBy('purchases.purchase_date', 'desc')
+                             ->orderBy('purchases.id', 'desc')
+                             ->get();
+
+            // Attach returns to each row
+            $rows = $results->map(function ($row) {
+                $returns = DB::table('purchase_return_items')
+                    ->join('purchase_returns', 'purchase_returns.id', '=', 'purchase_return_items.purchase_return_id')
+                    ->where('purchase_returns.purchase_id', $row->purchase_id)
+                    ->where('purchase_return_items.product_id', $row->product_id)
+                    ->select('purchase_return_items.qty', 'purchase_return_items.line_total')
+                    ->get();
+
+                $row->returns = $returns;
+                return $row;
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $rows
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 500);
         }
-        if ($productId && $productId !== 'all') {
-            $query->where('purchase_items.product_id', $productId);
-        }
-        if ($vendorId && $vendorId !== 'all') {
-            $query->where('purchases.vendor_id', $vendorId);
-        }
-
-        $results = $query->orderBy('purchases.purchase_date', 'asc')->get();
-
-        // Attach returns to each row
-        $rows = $results->map(function ($row) {
-            $returns = DB::table('purchase_return_items')
-                ->join('purchase_returns', 'purchase_returns.id', '=', 'purchase_return_items.purchase_return_id')
-                ->join('products', 'products.id', '=', 'purchase_return_items.product_id')
-                ->where('purchase_returns.purchase_id', DB::table('purchases')->where('invoice_no', $row->invoice_no)->value('id'))
-                ->where('purchase_return_items.product_id', DB::table('products')->where('item_code', $row->item_code)->value('id'))
-                ->select('products.item_name', 'purchase_return_items.qty', 'purchase_return_items.line_total')
-                ->get();
-
-            $row->returns = $returns;
-            return $row;
-        });
-
-        return response()->json([
-            'data' => $rows
-        ]);
     }
 
     public function sale_report()
     {
-        return view('admin_panel.reporting.sale_report');
+        $products = Product::orderBy('item_name')->get();
+        $customers = \App\Models\Customer::orderBy('customer_name')->get();
+        $officers = \App\Models\SalesOfficer::orderBy('name')->get();
+
+        return view('admin_panel.reporting.sale_report', compact('products', 'customers', 'officers'));
     }
 
     public function fetchsaleReport(Request $request)
     {
-        if ($request->ajax()) {
+        try {
             $start = $request->start_date;
             $end = $request->end_date;
+            $productId = $request->product_id;
+            $customerId = $request->customer_id;
+            $status = $request->status;
 
-            // Use Eloquent to handle relations and new table structure
-            $query = \App\Models\Sale::with(['customer_relation', 'items.product', 'returns']);
+            // Use Query Builder for high performance on detailed reports
+            $query = DB::table('sales')
+                ->join('sale_items', 'sales.id', '=', 'sale_items.sale_id')
+                ->leftJoin('products', 'sale_items.product_id', '=', 'products.id')
+                ->leftJoin('customers', 'sales.customer_id', '=', 'customers.id')
+                ->leftJoin('sales_officers', 'customers.sales_officer_id', '=', 'sales_officers.id')
+                ->leftJoin('warehouses', 'sale_items.warehouse_id', '=', 'warehouses.id')
+                ->leftJoin('product_packages', 'sale_items.product_package_id', '=', 'product_packages.id')
+                ->select(
+                    'sales.id as sale_id',
+                    'sales.created_at',
+                    'sales.invoice_no',
+                    'sales.reference',
+                    'sales.sale_status',
+                    'customers.customer_name',
+                    'sales_officers.name as officer_name',
+                    'products.item_name',
+                    'products.item_code',
+                    'sale_items.product_id',
+                    'sale_items.qty',
+                    'sale_items.total_pieces',
+                    'sale_items.price',
+                    'sale_items.discount_percent',
+                    'sale_items.total as line_total',
+                    'sales.total_net as invoice_net',
+                    'warehouses.warehouse_name',
+                    'product_packages.name as package_name',
+                    'product_packages.symbol as package_symbol'
+                );
 
             if ($start && $end) {
-                $query->whereBetween(DB::raw('DATE(created_at)'), [$start, $end]);
+                $query->whereBetween(DB::raw('DATE(sales.created_at)'), [$start, $end]);
+            }
+            if ($productId && $productId !== 'all') {
+                $query->where('sale_items.product_id', $productId);
+            }
+            if ($customerId && $customerId !== 'all') {
+                $query->where('sales.customer_id', $customerId);
+            }
+            if ($status && $status !== 'all') {
+                $query->where('sales.sale_status', $status);
             }
 
-            $sales = $query->orderBy('created_at', 'asc')->get();
+            $results = $query->orderBy('sales.created_at', 'desc')
+                             ->orderBy('sales.id', 'desc')
+                             ->get();
 
-            // Transform to match the structure expected by the frontend (CSV strings)
-            $transformed = $sales->map(function ($sale) {
-                // Construct comma-separated strings for legacy frontend support
-                $productNames = $sale->items->map(function ($item) {
-                    return $item->product ? $item->product->item_name : 'Unknown';
-                })->implode(',');
+            // Transform for frontend
+            $transformed = $results->map(function ($row) {
+                // Fetch returns for this specific sale and product
+                $returns = DB::table('sale_return_items')
+                    ->join('sale_returns', 'sale_returns.id', '=', 'sale_return_items.sale_return_id')
+                    ->where('sale_returns.sale_id', $row->sale_id)
+                    ->where('sale_return_items.product_id', $row->product_id)
+                    ->select('sale_return_items.qty', 'sale_return_items.line_total')
+                    ->get();
 
-                // Use SKU or Name as per preference, usually Name for reports
-                $productCodes = $sale->items->map(function ($item) {
-                    return $item->product ? $item->product->item_code : '-';
-                })->implode(',');
-
-                $qtys = $sale->items->pluck('qty')->implode(',');
-                $prices = $sale->items->pluck('price')->implode(','); // Unit Price
-                $totals = $sale->items->pluck('total')->implode(','); // Line Total
-
-                return [
-                    'id' => $sale->id,
-                    'reference' => $sale->reference ?? '-',
-                    'product' => $productNames,      // Names
-                    'product_code' => $productCodes, // Codes
-                    'brand' => '-',                  // Could extract from items if needed
-                    'unit' => '-',                   // Could extract
-                    'per_price' => $prices,
-                    'per_discount' => 0,             
-                    'qty' => $qtys,
-                    'per_total' => $totals,
-                    'total_net' => $sale->total_net,
-                    'created_at' => $sale->created_at->format('Y-m-d H:i:s'),
-                    'customer_name' => $sale->customer_relation ? $sale->customer_relation->customer_name : 'Walk-in',
-                    'returns' => $sale->returns->map(function($ret) {
-                         // Robust return display handling both legacy strings and new relation items
-                         $retItems = $ret->items;
-                         if ($retItems && $retItems->count() > 0) {
-                             $pNames = $retItems->map(fn($i) => $i->product->item_name ?? 'Unknown')->implode(', ');
-                             $pQtys = $retItems->pluck('qty')->implode(', ');
-                             $pTotal = $retItems->sum('line_total');
-                         } else {
-                             $pNames = $ret->product ?? '-';
-                             $pQtys = $ret->qty ?? 0;
-                             $pTotal = $ret->net_amount ?? 0;
-                         }
-
-                         return [
-                            'product' => $pNames,
-                            'qty' => $pQtys,
-                            'per_total' => $pTotal
-                         ];
-                    })
-                ];
+                $row->returns = $returns;
+                $row->formatted_date = \Carbon\Carbon::parse($row->created_at)->format('Y-m-d H:i');
+                return $row;
             });
 
-            return response()->json($transformed);
+            return response()->json([
+                'success' => true,
+                'data' => $transformed
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Sale Report Error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 500);
         }
-
-        return view('admin_panel.reporting.sale_report');
     }
 
     public function customer_ledger_report()

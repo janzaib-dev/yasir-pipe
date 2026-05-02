@@ -167,11 +167,6 @@
       <input type="hidden" class="size-h">
       <input type="hidden" class="size-w">
       <input type="hidden" class="size-mode-text">
-    </td>
-
-    <!-- STOCK -->
-    <td class="col-stock">
-      <input type="text" class="form-control stock text-center input-readonly" readonly tabindex="-1">
       <select class="warehouse d-none" name="warehouse_id[]"></select>
     </td>
 

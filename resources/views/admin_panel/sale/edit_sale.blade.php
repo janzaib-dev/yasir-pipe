@@ -264,10 +264,6 @@
             min-width: 160px;
         }
 
-        .col-stock {
-            width: 90px;
-        }
-
         .col-qty {
             width: 90px;
         }
@@ -451,7 +447,6 @@
                                         <th style="width: 140px;">Size (H x W)</th>
                                         <th style="width: 100px;">Mode</th>
                                         <th class="col-warehouse">Warehouse</th>
-                                        <th class="col-stock">Stock</th>
                                         <th class="col-qty qty-header">Total Boxes</th>
                                         <th class="col-qty pack-size-col">Conv Factor</th>
                                         <th class="col-pieces boxes-col">Pieces</th>
@@ -591,13 +586,6 @@
                                                     </select>
                                                 </td>
 
-                                                <!-- Stock -->
-                                                <td class="col-stock">
-                                                    <input type="text"
-                                                        class="form-control stock text-center input-readonly" readonly
-                                                        value="{{ $selStockDisp }}" tabindex="-1">
-                                                </td>
-
                                                 <!-- Qty Input -->
                                                 <td class="col-qty">
                                                     <div class="qty-wrapper input-group input-group-sm">
@@ -674,7 +662,7 @@
                                 </tbody>
                                 <tfoot>
                                     <tr>
-                                        <td colspan="11" class="text-end fw-bold">Total:</td>
+                                        <td colspan="10" class="text-end fw-bold">Total:</td>
                                         <td class="text-end fw-bold"><span id="totalAmount">0.00</span></td>
                                         <td></td>
                                     </tr>

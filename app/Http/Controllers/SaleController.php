@@ -922,232 +922,173 @@ class SaleController extends Controller
             'warehouse_id' => 'required|array',
         ]);
 
-        // Prevent duplicate products
-        if (count($request->product_id) !== count(array_unique($request->product_id))) {
-            throw \Illuminate\Validation\ValidationException::withMessages(['product_id' => 'Duplicate products are not allowed in a single sale. Please merge quantities.']);
-        }
+
 
         $status = $request->action === 'post' ? 'posted' : 'booked';
 
         // Concurrency Safe Transaction
-        return DB::transaction(function () use ($request, $sale, $status) {
+        try {
+            return DB::transaction(function () use ($request, $sale, $status) {
 
-            // 2. Prepare Header Data
-            $isNew = ! $sale->exists;
-            $sale->customer_id = $request->customer;
-            $sale->reference = $request->reference;
-            $sale->total_amount_Words = $request->total_amount_Words; // Consider auto-generating this too?
-            $sale->sale_status = $status;
+                // 2. Prepare Header Data
+                $isNew = ! $sale->exists;
+                $sale->customer_id = $request->customer;
+                $sale->reference = $request->reference;
+                $sale->total_amount_Words = $request->total_amount_Words;
+                $sale->sale_status = $status;
 
-            // Credit Days & Due Date (Optional)
-            if ($request->filled('credit_days') && $request->credit_days > 0) {
-                $creditDays = (int) $request->credit_days;
-                $sale->credit_days = $creditDays;
+                // Credit Days & Due Date
+                if ($request->filled('credit_days') && $request->credit_days > 0) {
+                    $creditDays = (int) $request->credit_days;
+                    $sale->credit_days = $creditDays;
+                    $baseDate = $sale->created_at ? $sale->created_at->copy() : now();
+                    $sale->due_date = $baseDate->addDays($creditDays);
+                } else {
+                    $sale->credit_days = null;
+                    $sale->due_date = null;
+                }
 
-                // Use existing created_at for edits, or now() for new sales
-                $baseDate = $sale->created_at ? $sale->created_at->copy() : now();
-                $sale->due_date = $baseDate->addDays($creditDays);
-            } else {
-                // No credit days = no notification
-                $sale->credit_days = null;
-                $sale->due_date = null;
-            }
+                if ($isNew) {
+                    if ($request->filled('invoice_no')) {
+                        $manualInvoice = trim($request->invoice_no);
+                        $exists = Sale::where('invoice_no', $manualInvoice)->exists();
+                        if ($exists) {
+                            throw \Illuminate\Validation\ValidationException::withMessages([
+                                'invoice_no' => "Invoice number '{$manualInvoice}' already exists.",
+                            ]);
+                        }
+                        $sale->invoice_no = $manualInvoice;
+                    } else {
+                        $sale->invoice_no = $this->generateUniqueInvoiceNo();
+                    }
+                }
 
-            if ($isNew) {
-                // Check if user provided manual invoice number
-                if ($request->filled('invoice_no')) {
-                    $manualInvoice = trim($request->invoice_no);
+                $total_bill = 0;
+                $total_items = 0;
+                $sale->save();
 
-                    // Check for duplicates
-                    $exists = Sale::where('invoice_no', $manualInvoice)->exists();
-                    if ($exists) {
-                        throw \Illuminate\Validation\ValidationException::withMessages([
-                            'invoice_no' => "Invoice number '{$manualInvoice}' already exists. Please use a different number or leave blank for auto-generation.",
-                        ]);
+                // 3. Process Items
+                if (! $isNew) {
+                    SaleItem::where('sale_id', $sale->id)->delete();
+                }
+
+                $productIds = $request->product_id;
+                $packageIds = $request->product_package_id;
+                $quantities = $request->qty; 
+                $warehouses = $request->warehouse_id;
+                $discounts = $request->item_disc ?? [];
+
+                foreach ($productIds as $index => $pid) {
+                    if (! $pid) continue;
+
+                    $qtyInput = (float) ($quantities[$index] ?? 0);
+                    if ($qtyInput <= 0) continue;
+
+                    $product = Product::findOrFail($pid);
+                    $packageId = $packageIds[$index] ?? null;
+                    $inputPrice = (float) ($request->price_per_piece[$index] ?? 0);
+                    $dbPrice = $inputPrice > 0 ? $inputPrice : ($product->sale_price_per_piece > 0 ? $product->sale_price_per_piece : 0);
+
+                    // Conversion Factor
+                    $cf = 1;
+                    if ($packageId) {
+                        $package = \App\Models\ProductPackage::find($packageId);
+                        if ($package) $cf = $package->conversion_factor > 0 ? $package->conversion_factor : 1;
+                    } else {
+                        $cf = $product->pieces_per_box > 0 ? $product->pieces_per_box : 1;
                     }
 
-                    $sale->invoice_no = $manualInvoice;
-                } else {
-                    // Auto-generate unique invoice number
-                    $sale->invoice_no = $this->generateUniqueInvoiceNo();
-                }
-            }
+                    $totalPieces = $qtyInput * $cf;
+                    $loose = (float) ($request->loose_pieces[$index] ?? 0);
+                    $totalPieces += $loose;
 
-            // We will calculate totals from verified items
-            $total_bill = 0;
-            $total_items = 0;
+                    $discount = (float) ($discounts[$index] ?? 0);
+                    $discType = $request->discount_type[$index] ?? 'percent';
 
-            $sale->save(); // Save first to get ID
-
-            // 3. Process Items
-            // Delete old items if updating
-            if (! $isNew) {
-                // Restore stock if we were somehow editing a posted sale (should be blocked, but safety first)
-                // For now, we blocked editing posted sales, so strictly 'booked'.
-                SaleItem::where('sale_id', $sale->id)->delete();
-            }
-
-            $productIds = $request->product_id;
-            $packageIds = $request->product_package_id;
-            $quantities = $request->qty; 
-
-            $warehouses = $request->warehouse_id;
-            $discounts = $request->item_disc ?? [];
-
-            foreach ($productIds as $index => $pid) {
-                if (! $pid) {
-                    continue;
-                }
-
-                $qtyInput = (float) ($quantities[$index] ?? 0);
-                if ($qtyInput <= 0) {
-                    continue;
-                }
-
-                $product = Product::findOrFail($pid);
-                $packageId = $packageIds[$index] ?? null;
-
-                // USE INPUT PRICE (User might have changed it manually)
-                $inputPrice = (float) ($request->price_per_piece[$index] ?? 0);
-                $dbPrice = $inputPrice > 0 ? $inputPrice : ($product->sale_price_per_piece > 0 ? $product->sale_price_per_piece : 0);
-
-                \Log::info("SaleItem #{$index}: Product {$product->item_name}, Package: {$packageId}, FinalPrice: {$dbPrice}");
-
-                // Get conversion factor from package or fallback to pieces_per_box
-                $cf = 1;
-                if ($packageId) {
-                    $package = \App\Models\ProductPackage::find($packageId);
-                    if ($package) {
-                        $cf = $package->conversion_factor > 0 ? $package->conversion_factor : 1;
+                    $lineTotal = $totalPieces * $dbPrice;
+                    if ($discType === 'pkr') {
+                        $calcDiscountAmount  = $discount;
+                        $calcDiscountPercent = $lineTotal > 0 ? round(($discount / $lineTotal) * 100, 4) : 0;
+                    } else {
+                        $calcDiscountPercent = $discount;
+                        $calcDiscountAmount  = round($lineTotal * $discount / 100, 2);
                     }
-                } else {
-                    $cf = $product->pieces_per_box > 0 ? $product->pieces_per_box : 1;
+
+                    $lineTotal = max(0, $lineTotal - $calcDiscountAmount);
+
+                    $saleItem = new SaleItem;
+                    $saleItem->sale_id = $sale->id;
+                    $saleItem->product_id = $pid;
+                    $saleItem->product_package_id = $packageId;
+                    $saleItem->warehouse_id = $warehouses[$index] ?? 1;
+                    $saleItem->product_name = $product->item_name;
+                    $saleItem->qty = ($cf > 0 ? ($totalPieces / $cf) : 0);
+                    $saleItem->total_pieces = $totalPieces;
+                    $saleItem->loose_pieces = $loose;
+                    $saleItem->price = $dbPrice;
+                    $saleItem->discount_percent = $calcDiscountPercent;
+                    $saleItem->discount_amount = $calcDiscountAmount;
+                    $saleItem->total = $lineTotal;
+                    $saleItem->brand_id = $product->brand_id;
+                    $saleItem->unit_id = $product->unit_id;
+                    $saleItem->size_mode = $product->size_mode;
+                    $saleItem->save();
+
+                    $total_bill += $lineTotal;
+                    $total_items += $totalPieces;
                 }
 
-                $totalPieces = $qtyInput * $cf;
-                $loose = (float) ($request->loose_pieces[$index] ?? 0);
-                $totalPieces += $loose;
+                $sale->total_bill_amount = $total_bill;
+                $sale->total_extradiscount = $request->total_extra_cost ?? 0;
+                $sale->total_net = $total_bill - $sale->total_extradiscount;
+                $sale->total_items = $total_items;
+                $sale->cash = $request->cash ?? 0;
+                $sale->change = ($sale->cash - $sale->total_net);
+                $sale->save();
 
-                // Calculate boxes for storage (reverse calculation)
-                $storedQtyBox = $cf > 0 ? ($totalPieces / $cf) : 0;
+                if ($status === 'posted') {
+                    $this->handleStockImpact($sale, 'out');
+                    $this->updateLedger($sale);
 
-                $discount = (float) ($discounts[$index] ?? 0);
-                // 'pkr' means fixed PKR amount;  anything else ('percent' or missing) = percentage
-                $discType = $request->discount_type[$index] ?? 'percent';
+                    try {
+                        $balanceService = app(\App\Services\BalanceService::class);
+                        $date = $sale->created_at->format('Y-m-d');
+                        $custForVoucher = $sale->customer_relation ?? \App\Models\Customer::find($sale->customer_id);
 
-                // Calculate Line Total (gross before discount)
-                $lineTotal = $totalPieces * $dbPrice;
+                        if ($custForVoucher) {
+                            $balanceService->createSaleVoucher($custForVoucher, $sale->total_net, $sale->invoice_no, $date);
+                        }
 
-                // Apply Discount correctly
-                if ($discType === 'pkr') {
-                    // User entered a fixed PKR amount
-                    $calcDiscountAmount  = $discount;
-                    // Back-calculate the equivalent percent for storage/reporting (avoid division by zero)
-                    $calcDiscountPercent = $lineTotal > 0 ? round(($discount / $lineTotal) * 100, 4) : 0;
-                } else {
-                    // User entered a percentage
-                    $calcDiscountPercent = $discount;
-                    $calcDiscountAmount  = round($lineTotal * $discount / 100, 2);
-                }
-
-                $lineTotal = max(0, $lineTotal - $calcDiscountAmount);
-
-                $saleItem = new SaleItem;
-                $saleItem->sale_id = $sale->id;
-                $saleItem->product_id = $pid;
-                $saleItem->product_package_id = $packageId;
-                $saleItem->warehouse_id = $warehouses[$index] ?? 1;
-                $saleItem->product_name = $product->item_name; // Store name snapshot
-
-                $saleItem->qty = $storedQtyBox; // Store as Box equivalent for consistency
-                $saleItem->total_pieces = $totalPieces;
-                $saleItem->loose_pieces = $loose;
-
-                $saleItem->price = $dbPrice;
-                $saleItem->discount_percent = $calcDiscountPercent;
-                $saleItem->discount_amount = $calcDiscountAmount;
-                $saleItem->total = $lineTotal;
-
-                // Meta
-                $saleItem->brand_id = $product->brand_id;
-                $saleItem->unit_id = $product->unit_id;
-                $saleItem->size_mode = $product->size_mode;
-
-                $saleItem->save();
-
-                $total_bill += $lineTotal;
-                $total_items += $totalPieces;
-            }
-
-            // Update Sale Totals
-            $sale->total_bill_amount = $total_bill;
-            $sale->total_extradiscount = $request->total_extra_cost ?? 0;
-            $sale->total_net = $total_bill - $sale->total_extradiscount;
-            $sale->total_items = $total_items;
-
-            $sale->cash = $request->cash ?? 0;
-            $sale->change = ($sale->cash - $sale->total_net);
-
-            $sale->save();
-
-            // 4. Handle Status Logic
-            if ($status === 'posted') {
-                \Log::info('Proceeding to Auto-Receipt & Ledger logic for Sale #'.$sale->invoice_no);
-
-                // 1. DEDUCT STOCK FROM WAREHOUSE
-                $this->handleStockImpact($sale, 'out');
-
-                // 2. LEGACY LEDGER: Post Invoice First (Increases Balance)
-                // This ensures the CustomerLedger has the Debit entry before we potentially Credit it with a receipt.
-                $this->updateLedger($sale);
-
-                try {
-                    $journalService = app(\App\Services\JournalEntryService::class);
-                    $balanceService = app(\App\Services\BalanceService::class);
-
-                    // Get account IDs dynamically
-                    $arAccountId = $balanceService->getAccountsReceivableId();
-                    $salesAccountId = $balanceService->getSalesRevenueId();
-                    $date = $sale->created_at->format('Y-m-d');
-
-                    // --- PROFESSIONAL LEDGER POSTING (ENTRY 1: THE INVOICE) ---
-                    // Create a Journal Voucher for the Sale Invoice (Debit AR, Credit Sales)
-                    $custForVoucher = $sale->customer_relation ?? \App\Models\Customer::find($sale->customer_id);
-
-                    if ($custForVoucher) {
-                        $balanceService->createSaleVoucher(
-                            $custForVoucher,
-                            $sale->total_net,
-                            $sale->invoice_no,
-                            $date
+                        $transactionService = app(\App\Services\TransactionService::class);
+                        $transactionService->createReceiptFromSale(
+                            $sale,
+                            $request->input('receipt_account_id', []),
+                            $request->input('receipt_amount', [])
                         );
+                    } catch (\Exception $e) {
+                        \Log::error('Accounting Error: '.$e->getMessage());
                     }
-
-                    // --- AUTO RECEIPT (ENTRY 2: THE PAYMENT) ---
-                    $transactionService = app(\App\Services\TransactionService::class);
-                    $transactionService->createReceiptFromSale(
-                        $sale,
-                        $request->input('receipt_account_id', []),
-                        $request->input('receipt_amount', [])
-                    );
-
-                } catch (\Exception $e) {
-                    \Log::error('Professional Ledger Posting Error: '.$e->getMessage());
                 }
-            }
 
-            // If AJAX/JSON response needed
-            if ($request->ajax() || $request->wantsJson()) {
-                return response()->json([
-                    'ok' => true,
-                    'booking_id' => $sale->id,
-                    'msg' => 'Sale '.ucfirst($status).' Successfully',
-                    'invoice_url' => route('sales.invoice', $sale->id),
-                ]);
-            }
+                if ($request->ajax() || $request->wantsJson()) {
+                    return response()->json([
+                        'ok' => true,
+                        'booking_id' => $sale->id,
+                        'msg' => 'Sale '.ucfirst($status).' Successfully',
+                        'invoice_url' => route('sales.invoice', $sale->id),
+                    ]);
+                }
 
-            return redirect()->route('sale.index')->with('success', 'Sale saved as '.$status);
-        });
+                return redirect()->route('sale.index')->with('success', 'Sale saved as '.$status);
+            });
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
+        } catch (\Exception $e) {
+            \Log::error('Sale Process Error: ' . $e->getMessage());
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'error' => 'Unable to process sale: ' . $e->getMessage()
+            ]);
+        }
     }
 
     private function handleStockImpact(Sale $sale, $type = 'out')
@@ -1176,7 +1117,8 @@ class SaleController extends Controller
             if ($type === 'out') {
                 // Deduct
                 if ($stock->total_pieces < $qtyPieces) {
-                    throw new \Exception('Insufficient stock for '.$item->product_name.'. Available: '.$stock->total_pieces);
+                    $uom = optional($item->product->unit)->name ?? 'pcs';
+                    throw new \Exception("Insufficient stock for '{$item->product_name}'. Requested: {$qtyPieces} {$uom}, Available: {$stock->total_pieces} {$uom} in selected warehouse.");
                 }
                 $stock->total_pieces -= $qtyPieces;
                 // Update approx boxes for display

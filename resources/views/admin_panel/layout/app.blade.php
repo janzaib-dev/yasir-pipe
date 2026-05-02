@@ -629,7 +629,7 @@
                                 </div>
                             @endcanany
                         </li>
-                        <li class="nav-item d-none">
+                        <li class="nav-item ">
                             @canany(['item.stock.report.view', 'purchase.report.view', 'sale.report.view',
                                 'customer.ledger.view', 'vendor.ledger.view', 'inventory.onhand.view', 'profit.loss.report.view',
                                 'recovery.report.view', 'payable.report.view', 'parties.balance.report.view', 'aging.report.view', 'balance.sheet.report.view', 'executive.report.view'])
