@@ -355,7 +355,7 @@ class ReportingController extends Controller
 
     public function purchase_report()
     {
-        $products = \App\Models\product::orderBy('item_name')->get();
+        $products = \App\Models\Product::orderBy('item_name')->get();
         $vendors = \App\Models\Vendor::orderBy('name')->get();
         return view('admin_panel.reporting.purchase_report', compact('products', 'vendors'));
     }
