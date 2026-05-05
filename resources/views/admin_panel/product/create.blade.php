@@ -363,15 +363,21 @@
                                      <label class="form-label-pro">Base UOM <span class="text-danger">*</span></label>
                                      <select class="form-select form-control-pro form-select-pro" name="base_uom" id="base_uom" required>
                                          <option value="">Select...</option>
+                                         <option value="pc">pc</option>
                                          <option value="m">m</option>
                                          <option value="cm">cm</option>
+                                         <option value="inc">inc</option>
+                                         <option value="ft">ft</option>
                                          <option value="kg">kg</option>
                                          <option value="gm">gm</option>
                                          <option value="mt">mt</option>
+                                         <option value="dz">dz</option>
+                                         <option value="lt">lt</option>
+                                         <option value="ea">ea</option>
                                      </select>
                                  </div>
 <div class="col-md-3">
-                                     <label class="form-label-pro">Model / Series</label>
+                                     <label class="form-label-pro">Size / Length</label>
                                      <input type="text" class="form-control-pro" name="model" placeholder="Optional">
                                  </div>
 

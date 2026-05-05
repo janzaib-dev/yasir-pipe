@@ -380,15 +380,21 @@
                                      @endphp
                                      <select class="form-select form-control-pro form-select-pro" name="base_uom" id="base_uom" required>
                                          <option value="">Select...</option>
+                                         <option value="pc" {{ $baseSymbol == 'pc' ? 'selected' : '' }}>pc</option>
                                          <option value="m" {{ $baseSymbol == 'm' ? 'selected' : '' }}>m</option>
                                          <option value="cm" {{ $baseSymbol == 'cm' ? 'selected' : '' }}>cm</option>
+                                         <option value="inc" {{ $baseSymbol == 'inc' ? 'selected' : '' }}>inc</option>
+                                         <option value="ft" {{ $baseSymbol == 'ft' ? 'selected' : '' }}>ft</option>
                                          <option value="kg" {{ $baseSymbol == 'kg' ? 'selected' : '' }}>kg</option>
                                          <option value="gm" {{ $baseSymbol == 'gm' ? 'selected' : '' }}>gm</option>
                                          <option value="mt" {{ $baseSymbol == 'mt' ? 'selected' : '' }}>mt</option>
+                                         <option value="dz" {{ $baseSymbol == 'dz' ? 'selected' : '' }}>dz</option>
+                                         <option value="lt" {{ $baseSymbol == 'lt' ? 'selected' : '' }}>lt</option>
+                                         <option value="ea" {{ $baseSymbol == 'ea' ? 'selected' : '' }}>ea</option>
                                      </select>
                                  </div>
 <div class="col-md-3">
-                                    <label class="form-label-pro">Model / Series</label>
+                                    <label class="form-label-pro">Size / Length</label>
                                     <input type="text" class="form-control-pro" name="model" value="{{ $product->model }}" placeholder="Optional">
                                 </div>
 
