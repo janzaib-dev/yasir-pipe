@@ -12,6 +12,7 @@ class WarehouseStock extends Model
     protected $fillable = [
         'warehouse_id',
         'product_id',
+        'product_package_id',
         'quantity',
         'boxes_quantity',
         'total_pieces',
@@ -43,5 +44,10 @@ class WarehouseStock extends Model
     {
         return $this->belongsToMany(Product::class, 'warehouse_stocks', 'warehouse_id', 'product_id')
             ->withPivot('quantity', 'price', 'remarks');
+    }
+
+    public function package()
+    {
+        return $this->belongsTo(ProductPackage::class, 'product_package_id');
     }
 }

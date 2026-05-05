@@ -194,7 +194,7 @@
     <div class="invoice-container">
         <!-- Company Header -->
         <div class="company-info">
-            <div class="company-name">Yasir Pipe Store</div>
+            <div class="company-name">Vahla Store</div>
             <div style="font-size: 12px;">Purchase Return Note</div>
         </div>
 

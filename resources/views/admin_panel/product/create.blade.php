@@ -411,15 +411,16 @@
                             <tr>
                                 <th style="width: 120px;">Code</th>
                                 <th style="width: 150px;">Name</th>
-                                <th style="width: 80px;">Symbol</th>
-                                <th style="width: 80px;">Fraction</th>
+                                <th style="width: 120px;">Size</th>
+                                <th style="width: 80px;" class="col-symbol">Symbol</th>
+                                <th style="width: 80px;" class="col-fraction">Fraction</th>
                                 <th>SKU</th>
                                 <th style="width: 80px;" class="d-none">Weight</th>
                                 <th style="width: 80px;" class="d-none">Height</th>
                                 <th style="width: 80px;" class="d-none">Width</th>
                                 <th style="width: 80px;" class="d-none">Length</th>
                                 <th>Barcode</th>
-                                <th style="width: 140px;">Conv Factor</th>
+                                <th style="width: 140px;" class="col-cf">Conv Factor</th>
                                 <th style="width: 100px;">Purch Price</th>
                                 <th style="width: 100px;">Sale Price</th>
                                 <th style="width: 80px;">Action</th>
@@ -553,15 +554,16 @@
                         <input type="hidden" name="packages[${rowCount}][is_base]" value="${isBase ? 1 : 0}">
                         <input type="text" class="form-control form-control-sm row-code" name="${codeName}" value="${codeVal}" readonly>
                     </td>
-                    <td><input type="text" class="form-control form-control-sm row-name" name="packages[${rowCount}][name]" ${isBase ? 'readonly' : ''}></td>
-                    <td>
+                    <td><input type="text" class="form-control form-control-sm row-name" name="packages[${rowCount}][name]" value=""></td>
+                    <td><input type="text" class="form-control form-control-sm row-size" name="packages[${rowCount}][size]"></td>
+                    <td class="col-symbol">
                         <select class="form-select form-select-sm row-symbol" name="packages[${rowCount}][symbol]" ${isBase ? 'readonly disabled' : ''} required>
                             <option value="">...</option>
                             ${selectSymbol}
                         </select>
                         ${isBase ? `<input type="hidden" class="hidden-base-symbol" name="packages[${rowCount}][symbol]" value="">` : ''}
                     </td>
-                    <td>
+                    <td class="col-fraction">
                         <select class="form-select form-select-sm row-fraction" name="packages[${rowCount}][is_fraction]" ${isBase ? 'readonly disabled' : ''}>
                             <option value="0">No</option>
                             <option value="1">Yes</option>
@@ -574,7 +576,7 @@
                     <td class="d-none"><input type="number" step="0.01" class="form-control form-control-sm" name="packages[${rowCount}][width]"></td>
                     <td class="d-none"><input type="number" step="0.01" class="form-control form-control-sm" name="packages[${rowCount}][length]"></td>
                     <td><input type="text" class="form-control form-control-sm" name="packages[${rowCount}][barcode]"></td>
-                    <td>
+                    <td class="col-cf">
                         <div class="input-group input-group-sm">
                             <input type="number" step="0.000001" class="form-control row-cf" name="packages[${rowCount}][conversion_factor]" value="${isBase ? '1' : ''}" ${isBase ? 'readonly' : ''} required>
                             <span class="input-group-text cf-unit-label">${baseUomSelect.value || '...'}</span>
@@ -608,8 +610,10 @@
                     
                     if(!isBase) {
                         const cf = parseFloat(cfInput.value) || 1;
-                        purchInput.value = (basePurchPrice * cf).toFixed(2);
-                        saleInput.value = (baseSalePrice * cf).toFixed(2);
+                        if(baseUomSelect.value !== 'pc') {
+                            purchInput.value = (basePurchPrice * cf).toFixed(2);
+                            saleInput.value = (baseSalePrice * cf).toFixed(2);
+                        }
                     }
                     
                     tr.querySelectorAll('input, select').forEach(el => {
@@ -624,11 +628,22 @@
                         tr.remove();
                     });
                 }
+                
+                // Re-trigger toggle logic for newly added row
+                baseUomSelect.dispatchEvent(new Event('change'));
             }
             
+            let lastProductName = '';
             function syncBaseName() {
                 const baseNameInp = tbody.querySelector('tr:first-child .row-name');
-                if(baseNameInp) baseNameInp.value = productNameInput.value;
+                if(baseNameInp) {
+                    // Only sync if empty OR if it currently matches the last known product name
+                    // This allows manual edits to persist
+                    if(!baseNameInp.value || baseNameInp.value === lastProductName) {
+                        baseNameInp.value = productNameInput.value;
+                    }
+                }
+                lastProductName = productNameInput.value;
             }
             
             function syncBaseSymbol() {
@@ -653,13 +668,27 @@
                     el.textContent = unit;
                 });
                 syncBaseSymbol();
+                
+                // Toggle columns for Variant Mode vs Packaging Mode
+                const isPc = (this.value === 'pc');
+                const colsToToggle = document.querySelectorAll('.col-symbol, .col-fraction, .col-cf');
+                colsToToggle.forEach(el => {
+                    if(isPc) {
+                        el.classList.add('d-none');
+                        el.querySelectorAll('input, select').forEach(input => input.removeAttribute('required'));
+                    } else {
+                        el.classList.remove('d-none');
+                        el.querySelectorAll('.row-symbol, .row-cf').forEach(input => input.setAttribute('required', 'required'));
+                    }
+                });
             });
 
             addRowBtn.addEventListener('click', () => generateRow(false));
             
             generateRow(true);
 
-            
+            // Trigger change event to set initial UI state
+            baseUomSelect.dispatchEvent(new Event('change'));          
             // Image Handler
             const imgInput = document.getElementById('imageInput');
             const preview = document.getElementById('preview');
@@ -687,7 +716,7 @@
                 clr.classList.add('d-none');
             });
 
-            // AJAX Submission
+            // AJAX Submission — optimized for hosting speed
             form.addEventListener('submit', function(e) {
                 e.preventDefault();
                 const btn = document.querySelector('.btn-save-floating');
@@ -695,37 +724,70 @@
                 btn.innerHTML = '<i class="las la-spinner la-spin"></i> Saving...';
                 btn.disabled = true;
 
-                const formData = new FormData(form);
-                fetch(form.action, {
-                    method: 'POST',
-                    headers: {'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json'},
-                    body: formData
-                })
+                const imgFile = document.getElementById('imageInput').files[0];
+                let body, headers;
+
+                if (imgFile) {
+                    // Only use expensive multipart when there is an actual image
+                    body = new FormData(form);
+                    headers = {'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json'};
+                } else {
+                    // Faster: send as URL-encoded (no file, no multipart overhead)
+                    const params = new URLSearchParams();
+                    new FormData(form).forEach((val, key) => params.append(key, val));
+                    body = params;
+                    headers = {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    };
+                }
+
+                fetch(form.action, {method: 'POST', headers, body})
                 .then(r => r.json().then(data => ({status: r.status, body: data})))
                 .then(({status, body}) => {
                     if (status === 200 || body.status === 'success') {
-                         Swal.fire({
+                        Swal.fire({
                             icon: 'success', title: 'Saved!',
-                            text: 'Product created successfully', timer: 1500, showConfirmButton: false
-                        }).then(() => window.location.reload());
+                            text: 'Product created successfully', timer: 1200, showConfirmButton: false
+                        }).then(() => {
+                            // Reset form instead of full page reload for instant feel
+                            form.reset();
+                            document.getElementById('packagingTbody').innerHTML = '';
+                            rowCount = 0;
+                            lastProductName = '';
+                            generateRow(true);
+                            baseUomSelect.dispatchEvent(new Event('change'));
+                            // Reset image preview
+                            const prev = document.getElementById('preview');
+                            if(prev) prev.classList.add('d-none');
+                            const ph = document.getElementById('uploadPlaceholder');
+                            if(ph) ph.classList.remove('d-none');
+                            const clr = document.getElementById('clearImageBtn');
+                            if(clr) clr.classList.add('d-none');
+                            // Generate fresh barcode number (no server call needed)
+                            document.getElementById('barcodeInput').value = Math.floor(100000000000 + Math.random() * 900000000000);
+                        });
                     } else {
                         const msg = body.errors ? Object.values(body.errors).flat().join('<br>') : (body.message || 'Error');
                         Swal.fire({icon: 'error', title: 'Error', html: msg});
                     }
                 })
-                .catch(err => Swal.fire({icon: 'error', title: 'Error', text: 'Server Error'}))
+                .catch(() => Swal.fire({icon: 'error', title: 'Error', text: 'Server Error'}))
                 .finally(() => {
                     btn.innerHTML = originalContent;
                     btn.disabled = false;
                 });
             });
 
-            // Barcode
+            // Barcode — generate number locally (no server call on page load)
             const barIn = document.getElementById('barcodeInput');
             const barBtn = document.getElementById('generateBarcodeBtn');
             const barcodeUrl = '{{ route('generate-barcode-image') }}';
             
-            if (!barIn.value) fetch(barcodeUrl).then(r => r.json()).then(d => barIn.value = d.barcode_number);
+            // Fill barcode with a random number immediately — no HTTP round-trip
+            if (!barIn.value) barIn.value = Math.floor(100000000000 + Math.random() * 900000000000);
+            // Only hit the server when user explicitly wants a barcode image
             barBtn.addEventListener('click', () => fetch(barcodeUrl).then(r => r.json()).then(d => barIn.value = d.barcode_number));
 
             // Select2

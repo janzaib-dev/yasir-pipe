@@ -85,12 +85,14 @@ class InwardgatepassController extends Controller
                 InwardGatepassItem::create([
                     'inward_gatepass_id' => $gatepass->id,
                     'product_id' => $pid,
+                    'product_package_id' => $request->product_package_id[$i] ?? null,
                     'qty' => $q,
                 ]);
 
                 // movement (+)
                 $movementRows[] = [
                     'product_id' => $pid,
+                    'product_package_id' => $request->product_package_id[$i] ?? null,
                     'type' => 'in',
                     'qty' => $q,
                     'ref_type' => 'INWARD',
@@ -101,7 +103,7 @@ class InwardgatepassController extends Controller
                 ];
 
                 // stocks upsert
-                $this->upsertStocks($pid, +$q, (int) $request->branch_id, (int) $request->warehouse_id);
+                $this->upsertStocks($pid, +$q, (int) $request->branch_id, (int) $request->warehouse_id, $request->product_package_id[$i] ?? null);
             }
 
             if (! empty($movementRows)) {
@@ -241,6 +243,7 @@ class InwardgatepassController extends Controller
                 // log reverse movement
                 $movs[] = [
                     'product_id' => (int) $item->product_id,
+                    'product_package_id' => $item->product_package_id,
                     'type' => 'out',
                     'qty' => (float) $item->qty,
                     'ref_type' => 'INWARD_DELETE',
@@ -252,13 +255,17 @@ class InwardgatepassController extends Controller
 
                 // direct stock rollback (NO upsertStocks)
                 $stock = \App\Models\WarehouseStock::where('product_id', $item->product_id)
+                    ->where('product_package_id', $item->product_package_id)
                     ->where('warehouse_id', $gatepass->warehouse_id)
                     ->lockForUpdate()
                     ->first();
 
                 if ($stock) {
-                    $newQty = max(0, $stock->quantity - $item->qty);
-                    $stock->quantity = $newQty;
+                    $newTotalPieces = max(0, $stock->total_pieces - $item->qty);
+                    $stock->total_pieces = $newTotalPieces;
+                    $prod = Product::find($item->product_id);
+                    $ppb = ($prod && $prod->pieces_per_box > 0) ? $prod->pieces_per_box : 1;
+                    $stock->quantity = $newTotalPieces / $ppb;
                     $stock->save();
                 }
             }
@@ -291,21 +298,40 @@ class InwardgatepassController extends Controller
     }
 
     // --- small helper (same as ProductController) ---
-    private function upsertStocks(int $productId, float $qtyDelta, int $branchId, int $warehouseId): void
+    private function upsertStocks(int $productId, float $qtyDelta, int $branchId, int $warehouseId, ?int $productPackageId = null): void
     {
         $stock = \App\Models\WarehouseStock::where('warehouse_id', $warehouseId)
             ->where('product_id', $productId)
+            ->where('product_package_id', $productPackageId)
             ->lockForUpdate()
             ->first();
 
+        // Get Conversion Factor (PPB)
+        $ppb = 1;
+        if ($productPackageId) {
+            $package = \App\Models\ProductPackage::find($productPackageId);
+            if ($package) {
+                $ppb = $package->conversion_factor > 0 ? $package->conversion_factor : 1;
+            }
+        } else {
+            $product = Product::find($productId);
+            if ($product) {
+                $ppb = $product->pieces_per_box > 0 ? $product->pieces_per_box : 1;
+            }
+        }
+
         if ($stock) {
-            $stock->quantity += $qtyDelta;
+            // Update total pieces (assuming qtyDelta is in pieces or base unit)
+            $stock->total_pieces += $qtyDelta;
+            $stock->quantity = $stock->total_pieces / $ppb;
             $stock->save();
         } else {
             \App\Models\WarehouseStock::create([
                 'warehouse_id' => $warehouseId,
                 'product_id' => $productId,
-                'quantity' => $qtyDelta,
+                'product_package_id' => $productPackageId,
+                'total_pieces' => $qtyDelta,
+                'quantity' => $qtyDelta / $ppb,
                 'price' => 0,
             ]);
         }

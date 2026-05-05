@@ -138,13 +138,16 @@
                                             @endif
                                             <div>
                                                 <div class="fw-bold text-dark">{{ $stock->product->item_name ?? 'N/A' }}
+                                                    @if($stock->package)
+                                                        <span class="text-primary small">({{ $stock->package->size ?: $stock->package->name }})</span>
+                                                    @endif
                                                 </div>
                                                 <div class="small text-muted">{{ $stock->product->item_code ?? '' }}</div>
                                             </div>
                                         </div>
                                     </td>
                                     <td class="text-center text-nowrap">
-                                        <span class="badge bg-info text-dark">{{ $stock->quantity }} Boxes</span>
+                                        <span class="badge bg-info text-dark">{{ $stock->quantity }} {{ $stock->package->symbol ?? 'Boxes' }}</span>
                                     </td>
                                     <td class="text-center fw-bold text-primary">
                                         {{ number_format($stock->total_pieces) }}</td>

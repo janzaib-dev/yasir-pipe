@@ -881,7 +881,7 @@
                                 }
                             };
                         },
-                        cache: true
+                        cache: false
                     },
                     minimumInputLength: 0,
                     templateResult: formatProduct,
@@ -958,18 +958,28 @@
 
             function formatProduct(repo) {
                 if (repo.loading) return repo.text;
-                let stock = repo.stock !== undefined ? repo.stock : 0;
-                let sku = repo.sku || 'N/A';
-                let badgeClass = 'bg-info'; // Neutral for Purchase
+
+                // Use numeric stock_pieces (not the string) for badge color logic
+                const stockNum = parseFloat(repo.stock_pieces) || 0;
+                const stockDisplay = repo.stock !== undefined ? repo.stock : '0';
+                const sku = repo.sku || 'N/A';
+                // Purchase shows neutral-info badge when in stock, danger when zero
+                const badgeClass = stockNum > 0 ? 'bg-info text-dark' : 'bg-danger';
+                const isVariant = (repo.base_uom === 'pc');
+
+                const nameHtml = repo.name || repo.text;
+                const stockTypeLabel = isVariant
+                    ? '<span class="text-info" style="font-size:0.72rem;">▸ Variant</span>'
+                    : '<span class="text-secondary" style="font-size:0.72rem;">▸ Aggregate</span>';
 
                 return $(`
-            <div class="clearfix">
-                <div class="float-start">
-                    <div class="fw-bold">${repo.name || repo.text}</div>
-                    <small class="text-muted">SKU: ${sku}</small>
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:2px 0;">
+                <div>
+                    <div class="fw-semibold" style="font-size:0.88rem;">${nameHtml}</div>
+                    <div style="font-size:0.76rem; color:#6c757d;">SKU: ${sku} &nbsp; ${stockTypeLabel}</div>
                 </div>
-                <div class="float-end">
-                    <span class="badge ${badgeClass} rounded-pill">Stock: ${stock}</span>
+                <div class="text-end ms-2">
+                    <span class="badge ${badgeClass} rounded-pill" style="font-size:0.78rem; white-space:nowrap;">Stock: ${stockDisplay}</span>
                 </div>
             </div>
             `);

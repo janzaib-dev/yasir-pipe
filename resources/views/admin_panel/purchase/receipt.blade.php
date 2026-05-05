@@ -127,7 +127,7 @@
     <a href="javascript:window.print()" class="btn-print no-print">PRINT RECEIPT</a>
 
     <div class="header">
-        <div class="company-name">Yasir Pipe Store</div>
+        <div class="company-name">Vahla Store</div>
         <div class="sub-header">Gulshan-e-Ilahi, Hyderabad.</div>
         <div class="sub-header">0327-9226901</div>
     </div>

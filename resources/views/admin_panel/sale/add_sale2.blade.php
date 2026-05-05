@@ -122,6 +122,7 @@
                                 <tr>
                                     <td>
                                         <input type="hidden" name="product_id[]" class="product_id">
+                                        <input type="hidden" name="product_package_id[]" class="product_package_id">
                                         <input type="text" class="form-control productSearch"
                                             placeholder="Enter product name..." autocomplete="off">
                                         <ul class="searchResults list-group mt-1"></ul>
@@ -256,6 +257,7 @@
             warehouse_id: $('input[name="warehouse_id"]').val(),
 
             product_id: [],
+            product_package_id: [],
             item_code: [],
             uom: [],
             unit: [],
@@ -280,6 +282,7 @@
             const pid = $(this).find('.product_id').val();
             if (pid) {
                 formData.product_id.push(pid);
+                formData.product_package_id.push($(this).find('.product_package_id').val());
                 formData.item_code.push($(this).find('.item_code input').val());
                 formData.uom.push($(this).find('.uom input').val());
                 formData.unit.push($(this).find('.unit input').val());
@@ -390,6 +393,7 @@
 <tr>
     <td>
         <input type="hidden" name="product_id[]" class="product_id">
+        <input type="hidden" name="product_package_id[]" class="product_package_id">
         <input type="text" class="form-control productSearch" placeholder="Enter product name..." autocomplete="off">
         <ul class="searchResults list-group mt-1"></ul>
     </td>
@@ -451,7 +455,7 @@
                         html += `
 <li class="list-group-item search-result-item"
     tabindex="0"
-    data-product-id="${id}"
+    data-composite-id="${p.id}"
     data-product-name="${name}"
     data-product-uom="${brand}"
     data-product-unit="${unit}"
@@ -478,7 +482,12 @@
             $row.find('.uom input').val($li.data('product-uom'));
             $row.find('.unit input').val($li.data('product-unit'));
             $row.find('.price').val($li.data('price'));
-            $row.find('.product_id').val($li.data('product-id'));
+            
+            // Parse Composite ID
+            const compositeId = $li.data('composite-id').toString();
+            const parts = compositeId.split('|');
+            $row.find('.product_id').val(parts[0]);
+            $row.find('.product_package_id').val(parts[1] || '');
 
             // Stock & Meta
             $row.find('.stock-qty').val($li.data('stock'));

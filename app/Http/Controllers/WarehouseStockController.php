@@ -59,7 +59,7 @@ class WarehouseStockController extends Controller
 
     public function index()
     {
-        $stocks = WarehouseStock::with('warehouse', 'product')->latest()->paginate(10);
+        $stocks = WarehouseStock::with(['warehouse', 'product', 'package'])->latest()->paginate(10);
 
         return view('admin_panel.warehouses.warehouse_stocks.index', compact('stocks'));
     }
@@ -75,19 +75,24 @@ class WarehouseStockController extends Controller
     {
         $validated = $request->validate([
             'warehouse_id' => 'required|exists:warehouses,id',
-            'product_id' => 'required|exists:products,id',
-            'total_pieces' => 'required|integer|min:0',
-            'total_box' => 'required|integer|min:0',
+            'product_id' => 'required', // Now a composite ID
+            'total_pieces' => 'required|numeric|min:0',
+            'total_box' => 'required|numeric|min:0',
             'remarks' => 'nullable|string|max:255',
         ]);
 
         try {
+            $parts = explode('|', $validated['product_id']);
+            $productId = (int)$parts[0];
+            $packageId = isset($parts[1]) ? (int)$parts[1] : null;
+
             $this->stockService->addStock(
                 $validated['warehouse_id'],
-                $validated['product_id'],
+                $productId,
                 $validated['total_pieces'],
                 $validated['total_box'],
-                $request->input('remarks')
+                $request->input('remarks'),
+                $packageId
             );
 
             return response()->json([
@@ -201,22 +206,25 @@ class WarehouseStockController extends Controller
     {
         $term = $request->get('q', '');
 
-        $products = Product::query()
-            ->select('id', 'item_name', 'item_code', 'pieces_per_box', 'image')
-            ->when($term, function ($query) use ($term) {
+        $results = \App\Models\ProductPackage::with('product')
+            ->whereHas('product', function($query) use ($term) {
                 $query->where('item_name', 'like', "%{$term}%")
-                    ->orWhere('item_code', 'like', "%{$term}%");
+                      ->orWhere('item_code', 'like', "%{$term}%");
             })
+            ->orWhere('name', 'like', "%{$term}%")
+            ->orWhere('sku', 'like', "%{$term}%")
             ->limit(20)
             ->get();
 
-        return response()->json($products->map(function ($p) {
+        return response()->json($results->map(function ($pkg) {
+            $p = $pkg->product;
+            $symbol = $pkg->symbol ?? '';
             return [
-                'id' => $p->id,
-                'text' => "{$p->item_code} - {$p->item_name}",
-                'item_name' => $p->item_name,
-                'item_code' => $p->item_code,
-                'pieces_per_box' => $p->pieces_per_box ?? 0,
+                'id' => $p->id . '|' . $pkg->id,
+                'text' => "{$p->item_name} - " . ($pkg->name ?? $pkg->code) . ($symbol ? " ({$symbol})" : ""),
+                'item_name' => $p->item_name . " - " . ($pkg->name ?? $pkg->code),
+                'item_code' => $pkg->sku ?? $p->item_code,
+                'pieces_per_box' => $pkg->conversion_factor ?? 1,
                 'image' => $p->image ? asset('uploads/products/'.$p->image) : null,
             ];
         }));
@@ -226,11 +234,16 @@ class WarehouseStockController extends Controller
     {
         $request->validate([
             'warehouse_id' => 'required|exists:warehouses,id',
-            'product_id' => 'required|exists:products,id',
+            'product_id' => 'required', // Composite ID
         ]);
 
+        $parts = explode('|', $request->product_id);
+        $productId = (int)$parts[0];
+        $packageId = isset($parts[1]) ? (int)$parts[1] : null;
+
         $stock = WarehouseStock::where('warehouse_id', $request->warehouse_id)
-            ->where('product_id', $request->product_id)
+            ->where('product_id', $productId)
+            ->where('product_package_id', $packageId)
             ->first();
 
         return response()->json([

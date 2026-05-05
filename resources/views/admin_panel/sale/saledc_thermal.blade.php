@@ -203,7 +203,7 @@
 
     <div class="receipt-container">
         <!-- Header -->
-        <div class="company-name">Yasir Pipe Store</div>
+        <div class="company-name">Vahla Store</div>
         <div class="company-info">
             <div>Gulshan-e-Ilahi, Hyderabad.</div>
             <div>Ph: 0327-9226901</div>

@@ -22,17 +22,28 @@ class PurchaseController extends Controller
 {
     /** Keep stocks table in sync for a (branch,warehouse,product) */
     /** Keep warehouse_stocks table in sync for a (warehouse,product) */
-    private function upsertStocks(int $productId, float $qtyPiecesDelta, int $branchId, int $warehouseId): void
+    private function upsertStocks(int $productId, float $qtyPiecesDelta, int $branchId, int $warehouseId, ?int $productPackageId = null): void
     {
         // We ignore $branchId as WarehouseStock is warehouse-specific
         $stock = \App\Models\WarehouseStock::where('warehouse_id', $warehouseId)
             ->where('product_id', $productId)
+            ->where('product_package_id', $productPackageId)
             ->lockForUpdate()
             ->first();
 
-        // Get Product Master Data for Box Calculation
-        $product = Product::find($productId);
-        $ppb = $product->pieces_per_box > 0 ? $product->pieces_per_box : 1;
+        // Get Conversion Factor (PPB)
+        $ppb = 1;
+        if ($productPackageId) {
+            $package = \App\Models\ProductPackage::find($productPackageId);
+            if ($package) {
+                $ppb = $package->conversion_factor > 0 ? $package->conversion_factor : 1;
+            }
+        } else {
+            $product = Product::find($productId);
+            if ($product) {
+                $ppb = $product->pieces_per_box > 0 ? $product->pieces_per_box : 1;
+            }
+        }
 
         if ($stock) {
             // ✅ Add new pieces directly to existing balance to prevent precision/sync loss
@@ -46,9 +57,10 @@ class PurchaseController extends Controller
             \App\Models\WarehouseStock::create([
                 'warehouse_id' => $warehouseId,
                 'product_id' => $productId,
+                'product_package_id' => $productPackageId,
                 'total_pieces' => $qtyPiecesDelta,
                 'quantity' => $qtyPiecesDelta / $ppb, // Initial Box Qty
-                'price' => 0, // Should be fetched from Product or Purchase Item? 
+                'price' => 0, 
             ]);
         }
     }
@@ -129,6 +141,7 @@ class PurchaseController extends Controller
                 // movements (+)
                 $movRows[] = [
                     'product_id' => $item->product_id,
+                    'product_package_id' => $item->product_package_id,
                     'type' => 'in',
                     'qty' => $item->qty,
                     'ref_type' => 'PURCHASE',
@@ -138,7 +151,7 @@ class PurchaseController extends Controller
                     'updated_at' => now(),
                 ];
                 // stocks
-                $this->upsertStocks($item->product_id, +$item->qty, $branchId, $warehouseId);
+                $this->upsertStocks($item->product_id, +$item->qty, $branchId, $warehouseId, $item->product_package_id);
             }
 
             if (! empty($movRows)) {

@@ -336,6 +336,7 @@
                                 @foreach ($sale->items as $index => $item)
                                     <tr>
                                         <input type="hidden" name="product_id[]" value="{{ $item['product_id'] }}">
+                                        <input type="hidden" name="product_package_id[]" value="{{ $item['product_package_id'] ?? '' }}">
                                         {{-- Hidden Discount to preserve refund math if needed --}}
                                         <input type="hidden" name="item_disc[]" class="item_disc"
                                             value="{{ $item['discount'] ?? 0 }}">

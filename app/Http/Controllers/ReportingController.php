@@ -11,19 +11,47 @@ class ReportingController extends Controller
 {
     public function onhand()
     {
-        $rows = Product::leftJoin('v_stock_onhand as soh', 'soh.product_id', '=', 'products.id')
-            ->leftJoin('brands', 'brands.id', '=', 'products.brand_id')
+        $products = Product::leftJoin('brands', 'brands.id', '=', 'products.brand_id')
             ->leftJoin('units', 'units.id', '=', 'products.unit_id')
-            ->selectRaw('
-                products.id,
-                products.item_code,
-                products.item_name,
-                COALESCE(brands.name, "") as brand_name,
-                COALESCE(units.name, "") as unit_name,
-                COALESCE(soh.onhand_qty, 0) as onhand_qty
-            ')
+            ->select('products.*', 'brands.name as brand_name', 'units.name as unit_name')
             ->orderBy('products.item_name')
             ->get();
+
+        $soh = DB::table('v_stock_onhand')->get();
+        $sohMap = [];
+        foreach ($soh as $s) {
+             $sohMap[$s->product_id][$s->product_package_id ?? 0] = $s->onhand_qty;
+        }
+
+        $packages = DB::table('product_packages')->get()->groupBy('product_id');
+
+        $rows = [];
+        foreach ($products as $p) {
+            $baseUom = strtolower($p->base_uom ?? $p->unit_name);
+            if ($baseUom === 'pc') {
+                $pkgs = $packages->get($p->id, []);
+                if (count($pkgs) > 0) {
+                    foreach ($pkgs as $pkg) {
+                        if ($pkg->is_base) continue; // Skip master row if it's pc variant
+                        $qty = $sohMap[$p->id][$pkg->id] ?? 0;
+                        $r = clone $p;
+                        $r->item_name = $p->item_name . ' - ' . ($pkg->name ?? $pkg->code);
+                        $r->onhand_qty = $qty;
+                        $rows[] = $r;
+                    }
+                } else {
+                    $p->onhand_qty = $sohMap[$p->id][0] ?? 0;
+                    $rows[] = $p;
+                }
+            } else {
+                $qty = 0;
+                if (isset($sohMap[$p->id])) {
+                    foreach ($sohMap[$p->id] as $q) $qty += $q;
+                }
+                $p->onhand_qty = $qty;
+                $rows[] = $p;
+            }
+        }
 
         return view('admin_panel.Reporting.onhand', compact('rows'));
     }

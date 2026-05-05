@@ -226,7 +226,7 @@
         <!-- Company Header -->
         @if(!($isEstimate ?? false))
         <div class="company-info">
-            <div class="company-name">Yasir Pipe Store</div>
+            <div class="company-name">Vahla Store</div>
             <div style="font-size: 12px;">Gulshan-e-Ilahi, Hyderabad.</div>
              <p>Phone: 03072996698 </p>
         </div>

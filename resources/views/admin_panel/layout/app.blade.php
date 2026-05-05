@@ -815,7 +815,7 @@
 
         <footer>
             <div class="footer-area">
-                <p>&copy; Copyright 2025. All right reserved.Yasir Pipe Store</p>
+                <p>&copy; Copyright 2025. All right reserved.Vahla Store</p>
             </div>
         </footer>
     </div>

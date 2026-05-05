@@ -9,7 +9,7 @@ class InwardGatepassItem extends Model
 {
     use HasFactory;
 
-      protected $fillable = ['inward_gatepass_id','product_id','qty'];
+      protected $fillable = ['inward_gatepass_id','product_id','product_package_id','qty'];
 
     public function gatepass()
     {

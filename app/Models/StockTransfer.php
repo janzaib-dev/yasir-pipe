@@ -13,6 +13,7 @@ class StockTransfer extends Model
     'to_warehouse_id',
     'to_shop',
     'product_id',
+    'product_package_id',
     'quantity',
     'remarks',
 ];

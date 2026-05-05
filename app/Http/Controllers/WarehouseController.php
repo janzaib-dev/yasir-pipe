@@ -12,15 +12,37 @@ class WarehouseController extends Controller
     public function getWarehouses(Request $request)
     {
         $productId = $request->input('product_id');
+        $packageId = $request->input('package_id');
+
+        $p = \App\Models\Product::with('packages', 'unit')->find($productId);
+        if (!$p) return response()->json([]);
+
+        $PC_SYMBOLS = ['pc', 'pcs', ''];
+        $hasNonPc = collect($p->packages)->contains(function($pkg) use ($PC_SYMBOLS) {
+            return !in_array(strtolower($pkg->symbol ?? ''), $PC_SYMBOLS);
+        });
+        $unitName = strtolower($p->unit->name ?? '');
+        $isPcBased = in_array($unitName, ['pc', 'pcs', 'piece', 'pieces']) && !$hasNonPc;
 
         // Get all warehouses first
         $allWarehouses = Warehouse::all();
         
         // Get stock entries for this product
-        $warehouseStocks = WarehouseStock::with(['stockWarehouse', 'product'])
-            ->where('product_id', $productId)
-            ->get()
-            ->keyBy('warehouse_id');
+        $wsQuery = WarehouseStock::with(['stockWarehouse', 'product'])->where('product_id', $productId);
+        if ($isPcBased && $packageId) {
+            $wsQuery = $wsQuery->where('product_package_id', $packageId);
+        }
+
+        // If aggregate mode, we need to SUM the total_pieces per warehouse.
+        // Wait, if it's aggregate mode, there might be multiple rows per warehouse!
+        // We must group by warehouse_id.
+        $warehouseStocksRaw = $wsQuery->get();
+        $warehouseStocks = $warehouseStocksRaw->groupBy('warehouse_id')->map(function($rows) {
+            $first = $rows->first();
+            $first->total_pieces = $rows->sum('total_pieces');
+            $first->quantity = $rows->sum('quantity');
+            return $first;
+        });
 
         $response = $allWarehouses->map(function ($warehouse) use ($warehouseStocks, $productId) {
             $ws = $warehouseStocks->get($warehouse->id);

@@ -116,7 +116,7 @@
                         }
                     };
                 },
-                cache: true
+                cache: false
             },
             minimumInputLength: 0,
             templateResult: formatProduct,
@@ -126,19 +126,29 @@
 
     function formatProduct(repo) {
         if (repo.loading) return repo.text;
-        let stock = repo.stock !== undefined ? repo.stock : 0;
-        let sku = repo.sku || 'N/A';
-        let badgeClass = stock > 0 ? 'bg-success' : 'bg-danger';
-            console.log(repo);
-            
+
+        // Use numeric stock_pieces (not the string) for badge color logic
+        const stockNum = parseFloat(repo.stock_pieces) || 0;
+        const stockDisplay = repo.stock !== undefined ? repo.stock : '0';
+        const sku = repo.sku || 'N/A';
+        const badgeClass = stockNum > 0 ? 'bg-success' : 'bg-danger';
+        const isVariant = (repo.base_uom === 'pc');
+
+        // Name line: for "pc" products the variant name IS the product name (e.g. "Bolt - 2pc")
+        // for others, just product name
+        const nameHtml = repo.name || repo.text;
+        const stockTypeLabel = isVariant
+            ? '<span class="text-info" style="font-size:0.72rem;">▸ Variant</span>'
+            : '<span class="text-secondary" style="font-size:0.72rem;">▸ Aggregate</span>';
+
         return $(`
-        <div class="clearfix">
-            <div class="float-start">
-                <div class="fw-bold">${repo.name || repo.text}</div>
-                <small class="text-muted">SKU: ${sku}</small>
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:2px 0;">
+            <div>
+                <div class="fw-semibold" style="font-size:0.88rem;">${nameHtml}</div>
+                <div style="font-size:0.76rem; color:#6c757d;">SKU: ${sku} &nbsp; ${stockTypeLabel}</div>
             </div>
-            <div class="float-end">
-                <span class="badge ${badgeClass} rounded-pill">Stock: ${stock}</span>
+            <div class="text-end ms-2">
+                <span class="badge ${badgeClass} rounded-pill" style="font-size:0.78rem; white-space:nowrap;">Stock: ${stockDisplay}</span>
             </div>
         </div>
     `);
@@ -296,13 +306,14 @@
         });
     }
 
-    function loadWarehousesForProduct($row, productId, preSelectId = null) {
+    function loadWarehousesForProduct($row, productId, packageId, preSelectId = null) {
         var $whSelect = $row.find('.warehouse');
         $whSelect.html('<option value="">Loading...</option>');
         $row.find('.stock').val('');
 
         $.get('{{ route('warehouses.get') }}', {
-                product_id: productId
+                product_id: productId,
+                package_id: packageId
             })
             .done(function(warehouses) {
                 var validWarehouses = (Array.isArray(warehouses) ? warehouses : []).filter(function(w) {
@@ -361,7 +372,8 @@
         }
         
         $row.find('.stock').val(disp);
-        $row.data('stock_display', disp + " " + symbol + " (Total: " + stockPieces + " base)");
+        // Do NOT overwrite 'stock_display' here. 
+        // We want to keep the accurate stock string provided by fetchProductPrice (like Purchase view).
     }
 
 
@@ -772,10 +784,12 @@
             if (!compositeId) return;
             const $row = $(this).closest('tr');
 
-            // Extract real Product ID for warehouse lookup
-            const productId = compositeId.split('|')[0];
+            // Extract real Product ID & Package ID for warehouse lookup
+            const parts = compositeId.split('|');
+            const productId = parts[0];
+            const packageId = parts[1] || null;
 
-            loadWarehousesForProduct($row, productId);
+            loadWarehousesForProduct($row, productId, packageId);
             fetchProductPrice($row, compositeId);
         });
 

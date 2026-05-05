@@ -31,20 +31,47 @@ class ProductController extends Controller
             return response()->json(['retail_price' => 0]);
         }
 
-        // Total stock in pieces
-        $stockPieces = \App\Models\WarehouseStock::where('product_id', $productId)->sum('total_pieces');
-        $cf = $package->conversion_factor > 0 ? $package->conversion_factor : 1;
-        $symbol = $package->symbol ?? '';
+        $p = $product;
+        $pkg = $package;
+        $allProductPackages = $p->packages ?? collect();
+        $PC_SYMBOLS = ['pc', 'pcs', ''];
+        $hasNonPcSymbol = $allProductPackages->contains(function ($aPkg) use ($PC_SYMBOLS) {
+            return !in_array(strtolower($aPkg->symbol ?? ''), $PC_SYMBOLS);
+        });
 
-        if ($package->is_fraction) {
-            $stockDisplayCount = $stockPieces / $cf;
-            $stockDisplay = number_format($stockDisplayCount, 2) . " " . $symbol;
+        $thisPkgSymbol = strtolower($pkg->symbol ?? '');
+        if (!$allProductPackages->count() && !in_array($thisPkgSymbol, $PC_SYMBOLS)) {
+            $hasNonPcSymbol = true;
+        }
+
+        $unitName  = strtolower($p->unit->name ?? '');
+        $isUnitPc  = in_array($unitName, ['pc', 'pcs', 'piece', 'pieces']);
+        $isPcBased = $isUnitPc && !$hasNonPcSymbol;
+
+        if ($isPcBased) {
+            $stockPieces = (float) \Illuminate\Support\Facades\DB::table('warehouse_stocks')
+                            ->where('product_id', $p->id)
+                            ->where('product_package_id', $pkg->id)
+                            ->sum('total_pieces');
         } else {
-            $stockDisplayCount = floor($stockPieces / $cf); 
-            $loose = $stockPieces - ($stockDisplayCount * $cf);
-            $stockDisplay = $stockDisplayCount . " " . $symbol;
+            $stockPieces = (float) \App\Models\WarehouseStock::where('product_id', $p->id)->sum('total_pieces');
+        }
+
+        $cf     = $pkg->conversion_factor > 0 ? $pkg->conversion_factor : 1;
+        $symbol = $pkg->symbol ?? '';
+        $baseUom = $isPcBased ? 'pc' : strtolower($symbol ?: $unitName);
+
+        if ($isPcBased) {
+            $stockDisplay = number_format($stockPieces, 0) . ' ' . ($symbol ?: 'pcs');
+        } elseif ($pkg->is_fraction) {
+            $stockDisplayCount = $cf > 0 ? round($stockPieces / $cf, 2) : $stockPieces;
+            $stockDisplay = number_format($stockDisplayCount, 2) . ' ' . $symbol;
+        } else {
+            $stockDisplayCount = $cf > 0 ? floor($stockPieces / $cf) : $stockPieces;
+            $loose = fmod($stockPieces, $cf);
+            $stockDisplay = $stockDisplayCount . ' ' . $symbol;
             if ($loose > 0 && $cf > 1) {
-                $stockDisplay .= " (rem: {$loose} base)";
+                $stockDisplay .= ' +' . round($loose, 2);
             }
         }
 
@@ -100,7 +127,8 @@ class ProductController extends Controller
         $term = $request->get('term') ?? $request->get('q') ?? '';
 
         $query = \App\Models\ProductPackage::with(['product' => function ($q) {
-            $q->withSum('warehouseStocks', 'total_pieces');
+            $q->withSum('warehouseStocks', 'total_pieces')
+              ->with('packages:id,product_id,symbol,conversion_factor');
         }])
         ->where(function ($q) use ($term) {
             $q->where('name', 'like', "%{$term}%")
@@ -118,34 +146,80 @@ class ProductController extends Controller
             $p = $pkg->product;
             if (!$p) return null;
 
-            // Get total pieces from warehouse stocks
-            $stockPieces = (float) ($p->warehouse_stocks_sum_total_pieces ?? 0);
-            
-            // Calculate Stock Display based on conversion factor
-            $cf = $pkg->conversion_factor > 0 ? $pkg->conversion_factor : 1;
-            $symbol = $pkg->symbol ?? '';
-            
-            if ($pkg->is_fraction) {
-                $stockDisplayCount = $stockPieces / $cf;
-                $stockDisplay = number_format($stockDisplayCount, 2) . " " . $symbol;
+            // === RULE: Determine if this product is "pc-based" ===
+            // A product is pc-based (separate variant stock) ONLY if ALL its packages
+            // use pc/pcs symbols (or have no symbol). If ANY package has a non-pc
+            // symbol (kg, m, ft, m2, etc.) the product is NOT pc-based → aggregate stock.
+            $allProductPackages = $p->packages ?? collect();
+            $PC_SYMBOLS = ['pc', 'pcs', ''];
+            $hasNonPcSymbol = $allProductPackages->contains(function ($aPkg) use ($PC_SYMBOLS) {
+                return !in_array(strtolower($aPkg->symbol ?? ''), $PC_SYMBOLS);
+            });
+
+            // Also check current package's own symbol in case packages relation is empty
+            $thisPkgSymbol = strtolower($pkg->symbol ?? '');
+            if (!$allProductPackages->count() && !in_array($thisPkgSymbol, $PC_SYMBOLS)) {
+                $hasNonPcSymbol = true;
+            }
+
+            // pc-based = Piece unit AND no non-pc package symbols exist
+            $unitName  = strtolower($p->unit->name ?? '');
+            $isUnitPc  = in_array($unitName, ['pc', 'pcs', 'piece', 'pieces']);
+            $isPcBased = $isUnitPc && !$hasNonPcSymbol;
+
+            // === STOCK FETCH ===
+            if ($isPcBased) {
+                // Separate variant stock — only this package's rows
+                $stockPieces = (float) \Illuminate\Support\Facades\DB::table('warehouse_stocks')
+                                ->where('product_id', $p->id)
+                                ->where('product_package_id', $pkg->id)
+                                ->sum('total_pieces');
             } else {
-                $stockDisplayCount = floor($stockPieces / $cf); // Available full packages
-                $loose = $stockPieces - ($stockDisplayCount * $cf);
-                $stockDisplay = $stockDisplayCount . " " . $symbol;
+                // Aggregate stock — total for the whole product, then convert via CF
+                $stockPieces = (float) ($p->warehouse_stocks_sum_total_pieces ?? 0);
+            }
+
+            // === DISPLAY ===
+            $cf     = $pkg->conversion_factor > 0 ? $pkg->conversion_factor : 1;
+            $symbol = $pkg->symbol ?? '';
+            $baseUom = $isPcBased ? 'pc' : strtolower($symbol ?: $unitName);
+
+            if ($isPcBased) {
+                // Piece-based variant: show integer count + symbol
+                $stockDisplay = number_format($stockPieces, 0) . ' ' . ($symbol ?: 'pcs');
+            } elseif ($pkg->is_fraction) {
+                // Fractional conversion (e.g., 0.5 kg per unit)
+                $stockDisplayCount = $cf > 0 ? round($stockPieces / $cf, 2) : $stockPieces;
+                $stockDisplay = number_format($stockDisplayCount, 2) . ' ' . $symbol;
+            } else {
+                // Standard non-pc: divide aggregate stock by CF
+                // e.g., 150 kg ÷ 0.25 = 600 pcs; 150 kg ÷ 1 = 150 kg
+                $stockDisplayCount = $cf > 0 ? floor($stockPieces / $cf) : $stockPieces;
+                $loose = fmod($stockPieces, $cf);
+                $stockDisplay = $stockDisplayCount . ' ' . $symbol;
                 if ($loose > 0 && $cf > 1) {
-                    $stockDisplay .= " (rem: {$loose} base)";
+                    $stockDisplay .= ' +' . round($loose, 2);
                 }
+            }
+
+            $pkgSize = ($pkg->size && $pkg->size !== '0') ? $pkg->size : '';
+            $displayName = $p->item_name . " - " . ($pkg->name ?? $pkg->code);
+            if ($pkgSize) {
+                $displayName .= " - " . $pkgSize;
             }
 
             return [
                 'id' => $p->id . '|' . $pkg->id,
                 'product_id' => $p->id,
                 'package_id' => $pkg->id,
-                'text' => $p->item_name . " - " . ($pkg->name ?? $pkg->code) . " ({$symbol})",
-                'sku' => $pkg->sku ?? $p->item_code ?? '',
+                'text' => $displayName . ($symbol ? " ({$symbol})" : ""),
+                'sku' => ($pkg->sku && $pkg->sku !== '0') ? $pkg->sku : ($pkg->code ?: ($p->item_code ?? '')),
                 'stock' => $stockDisplay,
-                'stock_pieces' => $stockPieces, 
-                'name' => $p->item_name . " - " . ($pkg->name ?? $pkg->code),
+                'stock_pieces' => $stockPieces,
+                'base_uom' => $baseUom,
+                'name' => $displayName,
+                'variant_name' => $pkg->name,
+                'size' => $pkgSize,
                 'symbol' => $symbol,
                 'base_unit' => $p->unit->name ?? 'pc',
                 'size_mode' => $p->size_mode,
@@ -328,82 +402,84 @@ class ProductController extends Controller
             if ($request->wantsJson()) {
                 return response()->json(['status' => 'error', 'errors' => $validation->errors()], 422);
             }
-
             return redirect()->back()->withErrors($validation)->withInput();
         }
 
         $userId = Auth::id();
 
-        // Auto item_code (base code)
-        $lastProduct = Product::orderBy('id', 'desc')->first();
-        $nextCode = $lastProduct ? ('p-'.str_pad($lastProduct->id + 1, 6, '0', STR_PAD_LEFT)) : 'p-000001';
+        // Auto item_code — use MAX(id)+1 to avoid extra full-table query
+        $lastId  = Product::max('id') ?? 0;
+        $nextCode = 'p-' . str_pad($lastId + 1, 6, '0', STR_PAD_LEFT);
 
-        // Image upload
+        // Image upload (outside transaction — filesystem op)
+        $imagePath = null;
         if ($request->hasFile('image')) {
-            $file = $request->file('image');
-            $filename = time().'.'.$file->getClientOriginalExtension();
+            $file      = $request->file('image');
+            $filename  = time() . '.' . $file->getClientOriginalExtension();
             $file->move(public_path('uploads/products'), $filename);
             $imagePath = $filename;
-        } else {
-            $imagePath = null;
         }
 
-        DB::transaction(function () use ($request, $userId, $nextCode, $imagePath) {
+        $now = now();
 
-            // Create product
+        DB::transaction(function () use ($request, $userId, $nextCode, $imagePath, $now) {
+
             $product = Product::create([
-                'creater_id' => $userId,
-                'category_id' => $request->category_id,
-                'sub_category_id' => $request->sub_category_id,
-                'item_code' => $nextCode,
-                'item_name' => $request->product_name,
-                'barcode_path' => $request->barcode_path ?? rand(100000000000, 999999999999),
-                'unit_id' => 1, // Default or find unit by base_uom
-                'brand_id' => $request->brand_id,
-                'model' => $request->model,
-                'image' => $imagePath,
-                'color' => $request->color ? json_encode($request->color) : null,
-                'purchase_discount_percent' => $request->purchase_discount_percent ?? 0,
-                'sale_discount_percent' => $request->sale_discount_percent ?? 0,
-                'size_mode' => 'by_pieces', // legacy compatibility
-                'created_at' => now(),
-                'updated_at' => now(),
+                'creater_id'               => $userId,
+                'category_id'              => $request->category_id,
+                'sub_category_id'          => $request->sub_category_id,
+                'item_code'                => $nextCode,
+                'item_name'                => $request->product_name,
+                'barcode_path'             => $request->barcode_path ?: rand(100000000000, 999999999999),
+                'unit_id'                  => 1,
+                'brand_id'                 => $request->brand_id,
+                'model'                    => $request->model,
+                'image'                    => $imagePath,
+                'color'                    => $request->color ? json_encode($request->color) : null,
+                'purchase_discount_percent'=> $request->purchase_discount_percent ?? 0,
+                'sale_discount_percent'    => $request->sale_discount_percent ?? 0,
+                'size_mode'                => 'by_pieces',
             ]);
 
-            // Save packages
+            // Bulk-insert all packages in one query
+            $pkgRows = [];
             foreach ($request->packages as $pkg) {
                 $pkgCode = $pkg['code'] ?? null;
-                // If the code was a temporary one from the UI (p-000001...), replace it with the actual nextCode
                 if ($pkgCode && str_contains($pkgCode, 'p-000001')) {
                     $pkgCode = str_replace('p-000001', $nextCode, $pkgCode);
                 }
-
-                \App\Models\ProductPackage::create([
-                    'product_id' => $product->id,
-                    'code' => $pkgCode,
-                    'name' => $pkg['name'] ?? null,
-                    'symbol' => $pkg['symbol'] ?? null,
-                    'is_fraction' => isset($pkg['is_fraction']) ? (bool)$pkg['is_fraction'] : false,
-                    'sku' => $pkg['sku'] ?? null,
-                    'weight' => $pkg['weight'] ?? null,
-                    'height' => $pkg['height'] ?? null,
-                    'width' => $pkg['width'] ?? null,
-                    'length' => $pkg['length'] ?? null,
-                    'barcode' => $pkg['barcode'] ?? null,
+                $pkgRows[] = [
+                    'product_id'        => $product->id,
+                    'code'              => $pkgCode,
+                    'name'              => $pkg['name']              ?? null,
+                    'size'              => $pkg['size']              ?? null,
+                    'symbol'            => $pkg['symbol']            ?? null,
+                    'is_fraction'       => isset($pkg['is_fraction']) ? (int)(bool)$pkg['is_fraction'] : 0,
+                    'sku'               => $pkg['sku']               ?? null,
+                    'weight'            => $pkg['weight']            ?? null,
+                    'height'            => $pkg['height']            ?? null,
+                    'width'             => $pkg['width']             ?? null,
+                    'length'            => $pkg['length']            ?? null,
+                    'barcode'           => $pkg['barcode']           ?? null,
                     'conversion_factor' => $pkg['conversion_factor'] ?? 1,
-                    'purchase_price' => $pkg['purchase_price'] ?? 0,
-                    'sale_price' => $pkg['sale_price'] ?? 0,
-                    'is_base' => isset($pkg['is_base']) ? (bool)$pkg['is_base'] : false,
-                ]);
+                    'purchase_price'    => $pkg['purchase_price']    ?? 0,
+                    'sale_price'        => $pkg['sale_price']        ?? 0,
+                    'is_base'           => isset($pkg['is_base']) ? (int)(bool)$pkg['is_base'] : 0,
+                    'created_at'        => $now,
+                    'updated_at'        => $now,
+                ];
+            }
+            if (!empty($pkgRows)) {
+                \App\Models\ProductPackage::insert($pkgRows); // single query
             }
         });
 
         if ($request->wantsJson()) {
             return response()->json(['status' => 'success', 'message' => 'Product created successfully']);
         }
-
         return redirect()->back()->with('success', 'Product created successfully');
     }
+
 
     /*
     // ===== Parts search (for BOM modal) with real available qty =====
@@ -437,74 +513,85 @@ class ProductController extends Controller
     // ===== Update product =====
     public function update(Request $request, $id)
     {
-        $userId = auth()->id();
-
-        if ($request->wantsJson()) {
-            $validation = $this->validateProductRequest($request);
-            if ($validation->fails()) {
+        // Single validation pass (not double)
+        $validation = $this->validateProductRequest($request);
+        if ($validation->fails()) {
+            if ($request->wantsJson()) {
                 return response()->json(['status' => 'error', 'errors' => $validation->errors()], 422);
             }
-            $validated = $validation->validated();
-        } else {
-            $validation = $this->validateProductRequest($request);
-            $validation->validate();
+            return redirect()->back()->withErrors($validation)->withInput();
         }
 
-        // image handle
-        $imagePath = Product::where('id', $id)->value('image');
+        $userId = auth()->id();
+
+        // Fetch existing image, item_code, and barcode in a single lightweight query
+        $existingProduct = Product::select('item_code', 'image', 'barcode_path')->find($id);
+        $imagePath = $existingProduct->image ?? null;
+
         if ($request->hasFile('image')) {
-            $imageName = time().'.'.$request->image->extension();
+            $imageName = time() . '.' . $request->image->extension();
             $request->image->move(public_path('uploads/products'), $imageName);
             $imagePath = $imageName;
         }
 
-        DB::transaction(function () use ($request, $id, $userId, $imagePath) {
+        // Grab item_code and barcode before entering transaction
+        $itemCode = $request->item_code ?: ($existingProduct->item_code ?? 'p-000001');
+        $barcode  = $request->barcode_path ?: ($existingProduct->barcode_path ?: rand(100000000000, 999999999999));
+        $now = now();
+
+        DB::transaction(function () use ($request, $id, $userId, $imagePath, $itemCode, $barcode, $now) {
 
             Product::where('id', $id)->update([
-                'creater_id' => $userId,
-                'category_id' => $request->category_id,
-                'sub_category_id' => $request->sub_category_id,
-                'item_code' => $request->item_code ?? Product::where('id', $id)->value('item_code'),
-                'item_name' => $request->product_name,
-                'barcode_path' => $request->barcode_path ?? rand(100000000000, 999999999999),
-                'unit_id' => 1, // Default or find unit by base_uom
-                'brand_id' => $request->brand_id,
-                'model' => $request->model,
-                'image' => $imagePath,
-                'color' => $request->color ? json_encode($request->color) : null,
-                'purchase_discount_percent' => $request->purchase_discount_percent ?? 0,
-                'sale_discount_percent' => $request->sale_discount_percent ?? 0,
-                'size_mode' => 'by_pieces', // legacy compatibility
-                'updated_at' => now(),
+                'creater_id'               => $userId,
+                'category_id'              => $request->category_id,
+                'sub_category_id'          => $request->sub_category_id,
+                'item_code'                => $itemCode,
+                'item_name'                => $request->product_name,
+                'barcode_path'             => $barcode,
+                'unit_id'                  => 1,
+                'brand_id'                 => $request->brand_id,
+                'model'                    => $request->model,
+                'image'                    => $imagePath,
+                'color'                    => $request->color ? json_encode($request->color) : null,
+                'purchase_discount_percent'=> $request->purchase_discount_percent ?? 0,
+                'sale_discount_percent'    => $request->sale_discount_percent ?? 0,
+                'size_mode'                => 'by_pieces',
+                'updated_at'               => $now,
             ]);
 
+            // Delete old packages and bulk-insert new ones (2 queries total)
             \App\Models\ProductPackage::where('product_id', $id)->delete();
-            
-            // Save packages
+
+            $pkgRows = [];
             foreach ($request->packages as $pkg) {
-                \App\Models\ProductPackage::create([
-                    'product_id' => $id,
-                    'code' => $pkg['code'] ?? null,
-                    'name' => $pkg['name'] ?? null,
-                    'symbol' => $pkg['symbol'] ?? null,
-                    'is_fraction' => isset($pkg['is_fraction']) ? (bool)$pkg['is_fraction'] : false,
-                    'sku' => $pkg['sku'] ?? null,
-                    'weight' => $pkg['weight'] ?? null,
-                    'height' => $pkg['height'] ?? null,
-                    'width' => $pkg['width'] ?? null,
-                    'length' => $pkg['length'] ?? null,
-                    'barcode' => $pkg['barcode'] ?? null,
+                $pkgRows[] = [
+                    'product_id'        => $id,
+                    'code'              => $pkg['code']              ?? null,
+                    'name'              => $pkg['name']              ?? null,
+                    'size'              => $pkg['size']              ?? null,
+                    'symbol'            => $pkg['symbol']            ?? null,
+                    'is_fraction'       => isset($pkg['is_fraction']) ? (int)(bool)$pkg['is_fraction'] : 0,
+                    'sku'               => $pkg['sku']               ?? null,
+                    'weight'            => $pkg['weight']            ?? null,
+                    'height'            => $pkg['height']            ?? null,
+                    'width'             => $pkg['width']             ?? null,
+                    'length'            => $pkg['length']            ?? null,
+                    'barcode'           => $pkg['barcode']           ?? null,
                     'conversion_factor' => $pkg['conversion_factor'] ?? 1,
-                    'purchase_price' => $pkg['purchase_price'] ?? 0,
-                    'sale_price' => $pkg['sale_price'] ?? 0,
-                    'is_base' => isset($pkg['is_base']) ? (bool)$pkg['is_base'] : false,
-                ]);
+                    'purchase_price'    => $pkg['purchase_price']    ?? 0,
+                    'sale_price'        => $pkg['sale_price']        ?? 0,
+                    'is_base'           => isset($pkg['is_base']) ? (int)(bool)$pkg['is_base'] : 0,
+                    'created_at'        => $now,
+                    'updated_at'        => $now,
+                ];
+            }
+            if (!empty($pkgRows)) {
+                \App\Models\ProductPackage::insert($pkgRows);
             }
 
-            // Manual stock adjustment (extra on top)
+            // Manual stock adjustment
             if ($request->filled('stock_adjust') && (float) $request->stock_adjust != 0) {
                 $adjQty = (float) $request->stock_adjust;
-
                 \App\Models\StockMovement::create([
                     'product_id' => $id,
                     'type'       => 'adjustment',
@@ -512,7 +599,6 @@ class ProductController extends Controller
                     'ref_type'   => 'ADJ',
                     'note'       => 'Manual stock adjustment',
                 ]);
-
                 $this->upsertStocks($id, $adjQty, 1, 1);
             }
         });
@@ -520,30 +606,34 @@ class ProductController extends Controller
         if ($request->wantsJson()) {
             return response()->json(['status' => 'success', 'message' => 'Product updated successfully']);
         }
-
         return redirect()->back()->with('success', 'Product updated successfully');
     }
+
 
     // ===== Edit view =====
     public function edit($id)
     {
-        $product = Product::with('category_relation', 'sub_category_relation', 'unit', 'brand', 'warehouseStocks', 'packages')
+        // Use withSum instead of loading all stock rows — SQL aggregation is faster
+        $product = Product::with(['unit', 'brand', 'packages'])
+            ->withSum('warehouseStocks as total_pieces_sum', 'total_pieces')
             ->findOrFail($id);
-        $categories = Category::all();
-        $subcategories = SubCategory::all();
-        $brands = Brand::all();
 
-        // Calculate current stock from WarehouseStock (the real source of truth)
-        $totalPieces = $product->warehouseStocks->sum('total_pieces');
-        $ppb = $product->pieces_per_box > 0 ? $product->pieces_per_box : 1;
+        // Lazy-load only needed relations for dropdowns (parallel-friendly)
+        $categories    = Category::select('id', 'name')->get();
+        $subcategories = SubCategory::select('id', 'name')->get();
+        $brands        = Brand::select('id', 'name')->get();
+
+        // Stock calc using the aggregated value (no PHP-side sum loop)
+        $totalPieces = (int) ($product->total_pieces_sum ?? 0);
+        $ppb         = $product->pieces_per_box > 0 ? $product->pieces_per_box : 1;
 
         if ($product->size_mode === 'by_cartons' || $product->size_mode === 'by_size') {
             $product->boxes_quantity = (int) floor($totalPieces / $ppb);
             $product->loose_pieces   = (int) ($totalPieces % $ppb);
-        } elseif ($product->size_mode === 'by_pieces') {
-            $product->piece_quantity  = (int) $totalPieces;
-            $product->boxes_quantity  = 0;
-            $product->loose_pieces    = 0;
+        } else {
+            $product->piece_quantity = $totalPieces;
+            $product->boxes_quantity = 0;
+            $product->loose_pieces   = 0;
         }
 
         return view('admin_panel.product.edit', compact('product', 'categories', 'subcategories', 'brands'));

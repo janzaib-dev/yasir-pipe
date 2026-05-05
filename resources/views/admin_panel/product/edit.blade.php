@@ -439,15 +439,16 @@
                             <tr>
                                 <th style="width: 120px;">Code</th>
                                 <th style="width: 150px;">Name</th>
-                                <th style="width: 80px;">Symbol</th>
-                                <th style="width: 80px;">Fraction</th>
+                                <th style="width: 120px;">Size</th>
+                                <th style="width: 80px;" class="col-symbol">Symbol</th>
+                                <th style="width: 80px;" class="col-fraction">Fraction</th>
                                 <th>SKU</th>
                                 <th style="width: 80px;" class="d-none">Weight</th>
                                 <th style="width: 80px;" class="d-none">Height</th>
                                 <th style="width: 80px;" class="d-none">Width</th>
                                 <th style="width: 80px;" class="d-none">Length</th>
                                 <th>Barcode</th>
-                                <th style="width: 140px;">Conv Factor</th>
+                                <th style="width: 140px;" class="col-cf">Conv Factor</th>
                                 <th style="width: 100px;">Purch Price</th>
                                 <th style="width: 100px;">Sale Price</th>
                                 <th style="width: 80px;">Action</th>
@@ -586,15 +587,16 @@
                         <input type="hidden" name="packages[${rowCount}][is_base]" value="${isBase ? 1 : 0}">
                         <input type="text" class="form-control form-control-sm row-code" name="${codeName}" value="${codeVal}" readonly>
                     </td>
-                    <td><input type="text" class="form-control form-control-sm row-name" name="packages[${rowCount}][name]" value="${pkg ? (pkg.name||'') : ''}" ${isBase ? 'readonly' : ''}></td>
-                    <td>
+                    <td><input type="text" class="form-control form-control-sm row-name" name="packages[${rowCount}][name]" value="${pkg ? (pkg.name||'') : ''}"></td>
+                    <td><input type="text" class="form-control form-control-sm row-size" name="packages[${rowCount}][size]" value="${pkg ? (pkg.size||'') : ''}"></td>
+                    <td class="col-symbol">
                         <select class="form-select form-select-sm row-symbol" name="packages[${rowCount}][symbol]" ${isBase ? 'readonly disabled' : ''} required>
                             <option value="">...</option>
                             ${selectSymbol}
                         </select>
                         ${isBase ? `<input type="hidden" class="hidden-base-symbol" name="packages[${rowCount}][symbol]" value="${symVal}">` : ''}
                     </td>
-                    <td>
+                    <td class="col-fraction">
                         <select class="form-select form-select-sm row-fraction" name="packages[${rowCount}][is_fraction]" ${isBase ? 'readonly disabled' : ''}>
                             <option value="0" ${(pkg && !pkg.is_fraction) ? 'selected' : ''}>No</option>
                             <option value="1" ${(pkg && pkg.is_fraction) ? 'selected' : ''}>Yes</option>
@@ -607,7 +609,7 @@
                     <td class="d-none"><input type="number" step="0.01" class="form-control form-control-sm" name="packages[${rowCount}][width]" value="${pkg ? (pkg.width||'') : ''}"></td>
                     <td class="d-none"><input type="number" step="0.01" class="form-control form-control-sm" name="packages[${rowCount}][length]" value="${pkg ? (pkg.length||'') : ''}"></td>
                     <td><input type="text" class="form-control form-control-sm" name="packages[${rowCount}][barcode]" value="${pkg ? (pkg.barcode||'') : ''}"></td>
-                    <td>
+                    <td class="col-cf">
                         <div class="input-group input-group-sm">
                             <input type="number" step="0.000001" class="form-control row-cf" name="packages[${rowCount}][conversion_factor]" value="${pkg ? pkg.conversion_factor : (isBase ? '1' : '')}" ${isBase ? 'readonly' : ''} required>
                             <span class="input-group-text cf-unit-label">${baseUomSelect.value || '...'}</span>
@@ -644,8 +646,10 @@
                     
                     if(!isBase) {
                         const cf = parseFloat(cfInput.value) || 1;
-                        purchInput.value = (basePurchPrice * cf).toFixed(2);
-                        saleInput.value = (baseSalePrice * cf).toFixed(2);
+                        if(baseUomSelect.value !== 'pc') {
+                            purchInput.value = (basePurchPrice * cf).toFixed(2);
+                            saleInput.value = (baseSalePrice * cf).toFixed(2);
+                        }
                     }
                     
                     tr.querySelectorAll('input, select').forEach(el => {
@@ -660,14 +664,21 @@
                         tr.remove();
                     });
                 }
+                
+                // Re-trigger toggle logic for newly added row
+                baseUomSelect.dispatchEvent(new Event('change'));
             }
             
+            let lastProductName = productNameInput.value;
             function syncBaseName() {
                 const baseNameInp = tbody.querySelector('tr:first-child .row-name');
-                if(baseNameInp && !baseNameInp.value) baseNameInp.value = productNameInput.value;
-                else if(baseNameInp && document.activeElement === productNameInput) {
-                     baseNameInp.value = productNameInput.value;
+                if(baseNameInp) {
+                    // Only sync if empty OR if it currently matches the last known product name
+                    if(!baseNameInp.value || baseNameInp.value === lastProductName) {
+                        baseNameInp.value = productNameInput.value;
+                    }
                 }
+                lastProductName = productNameInput.value;
             }
             
             function syncBaseSymbol() {
@@ -692,6 +703,19 @@
                     el.textContent = unit;
                 });
                 syncBaseSymbol();
+                
+                // Toggle columns for Variant Mode vs Packaging Mode
+                const isPc = (this.value === 'pc');
+                const colsToToggle = document.querySelectorAll('.col-symbol, .col-fraction, .col-cf');
+                colsToToggle.forEach(el => {
+                    if(isPc) {
+                        el.classList.add('d-none');
+                        el.querySelectorAll('input, select').forEach(input => input.removeAttribute('required'));
+                    } else {
+                        el.classList.remove('d-none');
+                        el.querySelectorAll('.row-symbol, .row-cf').forEach(input => input.setAttribute('required', 'required'));
+                    }
+                });
             });
 
             addRowBtn.addEventListener('click', () => generateRow(null, false));
@@ -707,6 +731,9 @@
             } else {
                 generateRow(null, true);
             }
+            
+            // Trigger change event to set initial UI state for variants
+            baseUomSelect.dispatchEvent(new Event('change'));
 
             
             // Image Handler
@@ -744,7 +771,7 @@
                 @endif
             });
 
-            // AJAX Submission / Standard Submission
+            // AJAX Submission — optimized for hosting speed
             form.addEventListener('submit', function(e) {
                 e.preventDefault();
                 const btn = document.querySelector('.btn-save-floating');
@@ -752,30 +779,45 @@
                 btn.innerHTML = '<i class="las la-spinner la-spin"></i> Updating...';
                 btn.disabled = true;
 
-                const formData = new FormData(form);
-                fetch(form.action, {
-                    method: 'POST', // Method POST because we use _method=PUT in formData
-                    headers: {'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json'},
-                    body: formData
-                })
+                const imgFile = document.getElementById('imageInput').files[0];
+                let body, headers;
+
+                if (imgFile) {
+                    // Only use expensive multipart when there is an actual new image
+                    body = new FormData(form);
+                    headers = {'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json'};
+                } else {
+                    // Faster: URL-encoded — avoids multipart parsing overhead on server
+                    const params = new URLSearchParams();
+                    new FormData(form).forEach((val, key) => params.append(key, val));
+                    body = params;
+                    headers = {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    };
+                }
+
+                fetch(form.action, {method: 'POST', headers, body})
                 .then(r => r.json().then(data => ({status: r.status, body: data})))
                 .then(({status, body}) => {
                     if (status === 200 || body.status === 'success') {
-                         Swal.fire({
+                        Swal.fire({
                             icon: 'success', title: 'Updated!',
-                            text: 'Product updated successfully', timer: 1500, showConfirmButton: false
-                        }).then(() => window.location.href = "{{ route('product') }}"); // Redirect to list on edit success
+                            text: 'Product updated successfully', timer: 1200, showConfirmButton: false
+                        }).then(() => window.location.href = "{{ route('product') }}");
                     } else {
                         const msg = body.errors ? Object.values(body.errors).flat().join('<br>') : (body.message || 'Error');
                         Swal.fire({icon: 'error', title: 'Error', html: msg});
                     }
                 })
-                .catch(err => Swal.fire({icon: 'error', title: 'Error', text: 'Server Error'}))
+                .catch(() => Swal.fire({icon: 'error', title: 'Error', text: 'Server Error'}))
                 .finally(() => {
                     btn.innerHTML = originalContent;
                     btn.disabled = false;
                 });
             });
+
 
             // Barcode
             const barIn = document.getElementById('barcodeInput');

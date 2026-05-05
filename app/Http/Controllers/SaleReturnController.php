@@ -62,6 +62,7 @@ class SaleReturnController extends Controller
             $item->size_mode = $product->size_mode ?? 'by_pieces';
             $item->pieces_per_m2 = $product->m2_of_box ?? 0;
             $item->unit = $item->unit ?? 'pc';
+            $item->product_package_id = $item->product_package_id; // Pass through
             
             // Quantity calculations
             $item->qty = $item->total_pieces ?? $item->qty ?? 0;
@@ -147,6 +148,7 @@ class SaleReturnController extends Controller
                 SaleReturnItem::create([
                     'sale_return_id' => $return->id,
                     'product_id' => $productId,
+                    'product_package_id' => $request->product_package_id[$idx] ?? null,
                     'warehouse_id' => $validated['warehouse_id'],
                     'qty' => $qty,
                     'boxes' => $boxes + ($loosePieces / $ppb), // Decimal boxes
@@ -160,12 +162,13 @@ class SaleReturnController extends Controller
                 // Update Stock (INCREMENT - goods coming back)
                 $stock = WarehouseStock::where('warehouse_id', $validated['warehouse_id'])
                     ->where('product_id', $productId)
+                    ->where('product_package_id', $request->product_package_id[$idx] ?? null)
                     ->lockForUpdate()
                     ->first();
 
                 if ($stock) {
                     // Robust calculation
-                    $currentTotalPieces = $stock->quantity * $ppb;
+                    $currentTotalPieces = $stock->total_pieces; // Use total_pieces directly
                     $newTotalPieces = $currentTotalPieces + $qty;
                     
                     $stock->total_pieces = $newTotalPieces;
@@ -176,6 +179,7 @@ class SaleReturnController extends Controller
                     WarehouseStock::create([
                         'warehouse_id' => $validated['warehouse_id'],
                         'product_id' => $productId,
+                        'product_package_id' => $request->product_package_id[$idx] ?? null,
                         'total_pieces' => $qty,
                         'quantity' => $qty / $ppb,
                         'price' => 0
@@ -185,6 +189,7 @@ class SaleReturnController extends Controller
                 // Stock Movement (IN - goods returned to warehouse)
                 $movements[] = [
                     'product_id' => $productId,
+                    'product_package_id' => $request->product_package_id[$idx] ?? null,
                     'type' => 'in',
                     'qty' => $qty,
                     'ref_type' => 'SALE_RETURN',

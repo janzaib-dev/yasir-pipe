@@ -217,7 +217,7 @@
     <div class="invoice-container">
         <!-- Company Header -->
         <div class="company-info">
-            <div class="company-name">Yasir Pipe Store </div>
+            <div class="company-name">Vahla Store </div>
             <div>SADAR BAZAR </div>
             <div>HYDERABAD SINDH </div>
         </div>

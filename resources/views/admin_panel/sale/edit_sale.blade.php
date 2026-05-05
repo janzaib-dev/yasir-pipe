@@ -489,24 +489,37 @@
                                                 // Calculate Warehouse Stock Display for the SELECTED warehouse
                                                 $selStockDisp = '';
                                                 if ($item->warehouse_id) {
-                                                    $selWs = $prod->warehouseStocks
-                                                        ->where('warehouse_id', $item->warehouse_id)
-                                                        ->first();
-                                                    if ($selWs) {
-                                                        $stk = (float) $selWs->total_pieces;
-                                                        if ($stk <= 0 && $selWs->quantity > 0) {
-                                                            $stk = $selWs->quantity * $ppb;
+                                                    $PC_SYMBOLS = ['pc', 'pcs', ''];
+                                                    $hasNonPc = collect($prod->packages)->contains(function($p) use ($PC_SYMBOLS) {
+                                                        return !in_array(strtolower($p->symbol ?? ''), $PC_SYMBOLS);
+                                                    });
+                                                    $unitName = strtolower($prod->unit->name ?? '');
+                                                    $isPcBased = in_array($unitName, ['pc', 'pcs', 'piece', 'pieces']) && !$hasNonPc;
+
+                                                    $wsQuery = $prod->warehouseStocks->where('warehouse_id', $item->warehouse_id);
+                                                    if ($isPcBased && $item->product_package_id) {
+                                                        $wsQuery = $wsQuery->where('product_package_id', $item->product_package_id);
+                                                    }
+
+                                                    $stk = $wsQuery->sum('total_pieces');
+                                                    
+                                                    // Fallback to quantity * ppb if total_pieces is missing
+                                                    if ($stk <= 0 && $wsQuery->sum('quantity') > 0) {
+                                                        $stk = $wsQuery->sum('quantity') * $ppb;
+                                                    }
+
+                                                    if ($stk > 0 || $wsQuery->count() > 0) {
+                                                        $symbol = $item->package->symbol ?? '';
+                                                        if ($isPcBased) {
+                                                            $selStockDisp = number_format($stk, 0) . " " . ($symbol ?: 'pcs');
+                                                        } else {
+                                                            $stockDisplayCount = floor($stk / $ppb);
+                                                            $loose = $stk - ($stockDisplayCount * $ppb);
+                                                            $selStockDisp = $stockDisplayCount . " " . $symbol;
+                                                            if ($loose > 0 && $ppb > 1) {
+                                                                $selStockDisp .= " (rem: {$loose} base)";
+                                                            }
                                                         }
-
-                                                        $b = floor($stk / $ppb);
-                                                        $l = $stk % $ppb;
-
-                                                        $selStockDisp =
-                                                            in_array($sizeMode, ['by_cartons', 'by_size']) && $ppb > 0
-                                                                ? ($l > 0
-                                                                    ? "$b.$l"
-                                                                    : $b)
-                                                                : $stk;
                                                     }
                                                 }
                                             @endphp

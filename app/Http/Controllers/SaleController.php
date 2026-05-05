@@ -45,25 +45,61 @@ class SaleController extends Controller
         $q = $request->get('q');
         $warehouseId = $request->get('warehouse_id', 1);
 
+        // Join products with packages and then with warehouse_stocks
         $products = Product::with(['brand'])
+            ->join('product_packages', 'products.id', '=', 'product_packages.product_id')
             ->leftJoin('warehouse_stocks', function ($join) use ($warehouseId) {
                 $join->on('products.id', '=', 'warehouse_stocks.product_id')
+                    ->on('product_packages.id', '=', 'warehouse_stocks.product_package_id')
                     ->where('warehouse_stocks.warehouse_id', $warehouseId);
             })
             ->where(function ($query) use ($q) {
                 $query->where('products.item_name', 'like', "%{$q}%")
                     ->orWhere('products.item_code', 'like', "%{$q}%")
-                    ->orWhere('products.barcode_path', 'like', "%{$q}%");
+                    ->orWhere('product_packages.name', 'like', "%{$q}%")
+                    ->orWhere('product_packages.size', 'like', "%{$q}%");
             })
             ->select(
                 'products.*',
-                'warehouse_stocks.total_pieces as wh_stock',
-                'warehouse_stocks.quantity as wh_box_qty'
+                'product_packages.id as package_id',
+                'product_packages.name as package_name',
+                'product_packages.size as package_size',
+                'product_packages.conversion_factor as ppb',
+                'warehouse_stocks.total_pieces as wh_stock'
             )
             ->limit(50)
             ->get()
-            ->map(function ($product) {
-                return $product;
+            ->map(function ($p) {
+                $baseUom = strtolower($p->base_uom ?? $p->unit->name ?? '');
+                
+                // If it's a pc product, we want to show the variant name/size
+                if ($baseUom === 'pc') {
+                    $displayName = $p->item_name . " (" . ($p->package_size ?: $p->package_name) . ")";
+                    $stockDisplay = ($p->wh_stock ?? 0);
+                } else {
+                    // For non-pc, we might want to aggregate? 
+                    // But wait, the user said "showing overe all vaerint stock good".
+                    // If we join packages, we get one row per package.
+                    // If it's NOT pc, maybe we should group by product_id?
+                    // But if it's already "good", maybe I should just keep it?
+                    
+                    // Actually, if it's not pc, the user expects to see the product's total stock.
+                    $displayName = $p->item_name;
+                    $stockDisplay = \App\Models\WarehouseStock::where('product_id', $p->id)
+                        ->sum('total_pieces');
+                }
+
+                return [
+                    'id' => $p->id . '|' . $p->package_id,
+                    'item_name' => $displayName,
+                    'item_code' => $p->item_code,
+                    'brand' => $p->brand->name ?? '',
+                    'unit_id' => $p->unit_id,
+                    'price' => $p->price,
+                    'wh_stock' => $stockDisplay,
+                    'pieces_per_box' => $p->ppb,
+                    'color' => $p->color // JSON string
+                ];
             });
 
         return response()->json($products);
@@ -157,7 +193,7 @@ class SaleController extends Controller
             $item['max_returnable'] = max(0, $item['qty'] - $returned);
         }
 
-        return view('admin_panel.sale.return.create', [
+        return view('admin_panel.sale.sale_return.create', [
             'sale' => $sale,
             'Customer' => $customers,
             'saleItems' => $items,
@@ -292,6 +328,7 @@ class SaleController extends Controller
                 // Add to JSON structure for later processing
                 $jsonItems[] = [
                     'product_id' => $product_id,
+                    'product_package_id' => $request->product_package_id[$index] ?? null,
                     'qty' => $qty,
                     'price' => $price,
                 ];
@@ -490,6 +527,7 @@ class SaleController extends Controller
             // Update Warehouse Stock
             $stock = \App\Models\WarehouseStock::where('product_id', $productId)
                 ->where('warehouse_id', $warehouseId)
+                ->where('product_package_id', $item['product_package_id'] ?? null)
                 ->first();
 
             if ($stock) {
@@ -503,6 +541,7 @@ class SaleController extends Controller
             // Prepare Stock Movement
             $srMovements[] = [
                 'product_id' => $productId,
+                'product_package_id' => $item['product_package_id'] ?? null,
                 'type' => 'in',
                 'qty' => $qty,
                 'ref_type' => 'SR',
@@ -1101,14 +1140,45 @@ class SaleController extends Controller
         }
 
         foreach ($sale->items as $item) {
-            $stock = WarehouseStock::where('product_id', $item->product_id)
-                ->where('warehouse_id', $item->warehouse_id)
-                ->lockForUpdate() // LOCK ROW
-                ->first();
+            $prod = clone $item->product;
+            $prod->load('packages', 'unit');
+            
+            $PC_SYMBOLS = ['pc', 'pcs', ''];
+            $hasNonPc = collect($prod->packages)->contains(function($p) use ($PC_SYMBOLS) {
+                return !in_array(strtolower($p->symbol ?? ''), $PC_SYMBOLS);
+            });
+            $unitName = strtolower($prod->unit->name ?? '');
+            $isPcBased = in_array($unitName, ['pc', 'pcs', 'piece', 'pieces']) && !$hasNonPc;
+
+            $wsQuery = WarehouseStock::where('product_id', $item->product_id)
+                ->where('warehouse_id', $item->warehouse_id);
+
+            if ($isPcBased && $item->product_package_id) {
+                $wsQuery->where('product_package_id', $item->product_package_id);
+            }
+
+            // We need to lock the row(s). If aggregated, we can just grab the first row to deduct from, 
+            // but we should validate against the SUM of all rows for this product in this warehouse.
+            $allStocksForValidation = (clone $wsQuery)->get();
+            $aggregateTotal = $allStocksForValidation->sum('total_pieces');
+
+            $stock = $wsQuery->lockForUpdate()->first();
 
             if (! $stock) {
-                // Create if missing? Or fail? User said "Validate warehouse stock".
-                throw new \Exception('Stock not found for product: '.$item->product_name);
+                // If it's aggregated and we just don't have ANY row, we can create one on the fly
+                // or throw an error. Usually there should be at least one row if they bought it.
+                if ($type === 'out') {
+                    throw new \Exception('Stock not found for product: '.$item->product_name);
+                } else {
+                    $stock = WarehouseStock::create([
+                        'product_id' => $item->product_id,
+                        'warehouse_id' => $item->warehouse_id,
+                        'product_package_id' => $item->product_package_id,
+                        'quantity' => 0,
+                        'total_pieces' => 0
+                    ]);
+                    $aggregateTotal = 0;
+                }
             }
 
             // Convert everything to pieces for calculation
@@ -1116,9 +1186,9 @@ class SaleController extends Controller
 
             if ($type === 'out') {
                 // Deduct
-                if ($stock->total_pieces < $qtyPieces) {
+                if ($aggregateTotal < $qtyPieces) {
                     $uom = optional($item->product->unit)->name ?? 'pcs';
-                    throw new \Exception("Insufficient stock for '{$item->product_name}'. Requested: {$qtyPieces} {$uom}, Available: {$stock->total_pieces} {$uom} in selected warehouse.");
+                    throw new \Exception("Insufficient stock for '{$item->product_name}'. Requested: {$qtyPieces} {$uom}, Available: {$aggregateTotal} {$uom} in selected warehouse.");
                 }
                 $stock->total_pieces -= $qtyPieces;
                 // Update approx boxes for display
@@ -1129,6 +1199,7 @@ class SaleController extends Controller
                 // Movement
                 DB::table('stock_movements')->insert([
                     'product_id' => $item->product_id,
+                    'product_package_id' => $item->product_package_id,
                     'type' => 'out',
                     'qty' => -$qtyPieces, // Negative for OUT
                     'ref_type' => 'sale',
@@ -1148,6 +1219,7 @@ class SaleController extends Controller
                 // Movement
                 DB::table('stock_movements')->insert([
                     'product_id' => $item->product_id,
+                    'product_package_id' => $item->product_package_id,
                     'type' => 'in',
                     'qty' => $qtyPieces,
                     'ref_type' => 'sale_'.$type, // sale_in (cancel), sale_return
@@ -1239,6 +1311,7 @@ class SaleController extends Controller
         return $sale->items->map(function ($item) {
             return [
                 'product_id' => $item->product_id,
+                'product_package_id' => $item->product_package_id,
                 'item_name' => $item->product_name ?? $item->product->item_name ?? 'Item',
                 'item_code' => $item->product->item_code ?? '',
                 'brand' => $item->product->brand->name ?? '',
